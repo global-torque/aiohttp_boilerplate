@@ -1,4 +1,9 @@
-from aiohttp import web, hdrs
+import logging
+
+from aiohttp import hdrs, web
+
+
+logger = logging.getLogger(__name__)
 
 
 def setup_cors_headers(headers, allow):
@@ -20,13 +25,18 @@ async def cross_origin_rules(request, handler):
     if origin.count(domain) > 0:
         allow = origin
 
-    # response = await handler(request)
     try:
         response = await handler(request)
-    except Exception as err:
-        if hasattr(err, 'headers'):
-            setup_cors_headers(err.headers, allow)
-        raise err
+    except web.HTTPException as err:
+        setup_cors_headers(err.headers, allow)
+        raise
+    except Exception:
+        request_logger = getattr(request, 'log', logger)
+        request_logger.exception('Unhandled exception while processing request')
+        response = web.json_response(
+            {'__error__': ['HTTP Internal Server Error']},
+            status=web.HTTPInternalServerError.status_code,
+        )
 
     setup_cors_headers(response.headers, allow)
     return response

@@ -41,17 +41,17 @@ class E2ETestCase(UnitTestCase):
             con = await self.app.db_pool.acquire()
             # Truncate all the tables first
             for name, path in self.fixtures.items():
-                await self.truncate_table(path, con)
+                await self.truncate_table(path, con, name)
             for name, path in self.fixtures.items():
-                self.loaded_fixtures[name] = await self.load_fixture(path, con)
+                self.loaded_fixtures[name] = await self.load_fixture(path, con, name)
                 # print("Loaded: {}: {}".format(path, len(self.loaded_fixtures[name])))
 
             await self.app.db_pool.release(con)
 
-    async def truncate_table(self, path, con):
+    async def truncate_table(self, path, con, name):
 
         directory, _file = path.rsplit('/', 1)
-        fixture = LoadFixture(_file, directory)
+        fixture = LoadFixture(_file, directory, name)
 
         try:
             async with con.transaction():
@@ -61,10 +61,10 @@ class E2ETestCase(UnitTestCase):
             logging.error(err)
             raise Exception("cannot truncate {}, {}".format(path, str(err)))
 
-    async def load_fixture(self, path, con):
+    async def load_fixture(self, path, con, name):
 
         directory, _file = path.rsplit('/', 1)
-        fixture = LoadFixture(_file, directory)
+        fixture = LoadFixture(_file, directory, name)
 
         try:
             async with con.transaction():

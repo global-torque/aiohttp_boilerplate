@@ -277,21 +277,17 @@ class ObjectView(SchemaOptionsView):
     async def get_data(self, obj):
         self.request.log.debug("Start get_data method for ObjectView", str(obj.data))
 
-        data = {}
-        if self.schema:
-            # ToDo
-            # User schema loads
-            # ToDo
-            # Keep data in the bytes
-            # data = self.schema().dump(raw_data)
-            for f in self.schema().fields:
-                if f == "data":
-                    data[f] = getattr(obj, f)["data"]
-                else:
-                    data[f] = getattr(obj, f)
-        else:
-            # ToDo
-            # use obj from incoming parameter
-            data = self.obj.data
+        if not self.schema:
+            return self.obj.data
 
-        return data
+        schema = self.schema()
+        data = {}
+        for name, field in schema.fields.items():
+            if field.load_only:
+                continue
+            if name == "data":
+                data[name] = getattr(obj, name)["data"]
+            else:
+                data[name] = getattr(obj, name)
+
+        return schema.dump(data)

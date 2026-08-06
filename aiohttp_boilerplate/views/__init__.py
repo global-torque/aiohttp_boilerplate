@@ -12,7 +12,7 @@ from .request import Context
 def fix_json(obj):
     from .. import models
     if isinstance(obj, decimal.Decimal):
-        return float(obj)
+        return format(obj, "f")
     # ToDo
     # should we install python-dateutils
     # Or just use this hack ?

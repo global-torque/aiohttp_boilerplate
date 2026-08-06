@@ -1,5 +1,17 @@
 # aiohttp-boilerplate
 
+## Response serialization
+
+Views with a Marshmallow schema serialize model data through `Schema.dump()`.
+This applies field serializers, nested schemas, `load_only`, `data_key`, and
+dump hooks before creating the JSON response.
+
+Python `Decimal` values that reach the generic JSON fallback are encoded as
+base-10 strings rather than binary floating-point numbers. Define an explicit
+Marshmallow decimal field when an endpoint needs additional formatting or
+normalization. This behavior avoids precision loss but changes the JSON type
+from number to string compared with releases before 0.8.0.
+
 # ToDo
 - [ ] Create real simple ToDo example and create example with using different profiles and jsonb fields
 - [ ] for some reason logs goes to stderr in podman
@@ -9,4 +21,3 @@
 - [ ] Add more examples
 - [ ] Add integration with prometeus
 - [ ] Move to ujson instead of json library
-

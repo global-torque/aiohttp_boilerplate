@@ -19,6 +19,7 @@
 
 # sftp configuration file
 sftp-config.json
+aiohttp_boilerplate/logging/logging-gcp.json
 
 # Basics
 *.py[cod]

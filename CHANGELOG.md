@@ -11,6 +11,8 @@
   strings instead of binary floating-point numbers, removing insignificant
   fractional zeroes. This is an intentional response contract change for
   endpoints that previously emitted decimal JSON numbers.
+- Raise runtime dependency minimums to the versions validated by the 0.8.0
+  integration suite.
 
 ### Security
 

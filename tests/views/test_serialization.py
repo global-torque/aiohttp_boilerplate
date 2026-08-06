@@ -87,6 +87,26 @@ def test_decimal_json_fallback_is_lossless_string():
     }
 
 
+def test_decimal_json_fallback_is_canonical_string():
+    payload = json.loads(
+        fixed_dump(
+            {
+                "whole": Decimal("5001.0"),
+                "zero": Decimal("0E-18"),
+                "negative_zero": Decimal("-0.00"),
+                "fraction": Decimal("1.2300"),
+            }
+        )
+    )
+
+    assert payload == {
+        "whole": "5001",
+        "zero": "0",
+        "negative_zero": "0",
+        "fraction": "1.23",
+    }
+
+
 def test_create_view_keeps_id_only_default_response():
     result = asyncio.run(CreateView.get_data(object(), SimpleNamespace(id=42)))
 

@@ -7,9 +7,10 @@
 - Serialize model-backed response data through the configured Marshmallow
   schema, including custom fields, nested schemas, aliases, `load_only`, and
   dump hooks.
-- Serialize fallback Python `Decimal` values as lossless base-10 JSON strings
-  instead of binary floating-point numbers. This is an intentional response
-  contract change for endpoints that previously emitted decimal JSON numbers.
+- Serialize fallback Python `Decimal` values as lossless canonical base-10 JSON
+  strings instead of binary floating-point numbers, removing insignificant
+  fractional zeroes. This is an intentional response contract change for
+  endpoints that previously emitted decimal JSON numbers.
 
 ### Security
 

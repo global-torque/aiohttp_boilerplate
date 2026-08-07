@@ -133,8 +133,8 @@ aiohttp==3.14.3 \
     #   aiohttp-apispec
     #   aiohttp-cors
     #   pytest-aiohttp
-aiohttp-apispec @ https://github.com/webdevelop-pro/aiohttp-apispec/archive/refs/tags/v1.0.3.tar.gz \
-    --hash=sha256:4b9e771e2198859318c2d04fc09355001776a23db470d33c87ac65205686c349
+aiohttp-apispec @ https://github.com/webdevelop-pro/aiohttp-apispec/archive/4d9aaefc428fc42fe5d1b475ab8c3625c449ee07.tar.gz \
+    --hash=sha256:6599745e9f2f288265245cc305228449b7fceaf48c636a8e7322cc61fa2a27e3
     # via -r requirements.txt
 aiohttp-cors==0.8.1 \
     --hash=sha256:3180cf304c5c712d626b9162b195b1db7ddf976a2a25172b35bb2448b890a80d \

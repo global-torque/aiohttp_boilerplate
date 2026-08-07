@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.1 - 2026-08-07
+
+### Fixed
+
+- Pin the `aiohttp-apispec` source archive to its immutable commit and SHA-256
+  so application builds cannot change if the upstream release tag moves.
+
 ## 0.9.0 - 2026-08-07
 
 ### Added

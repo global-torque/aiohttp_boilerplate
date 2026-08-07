@@ -6,4 +6,4 @@ marshmallow-jsonschema>=0.16,<0.17
 PyJWT>=2.13,<3
 ujson>=5.13,<6
 python-json-logger>=4.1,<5
-aiohttp-apispec @ https://github.com/webdevelop-pro/aiohttp-apispec/archive/refs/tags/v1.0.3.tar.gz
+aiohttp-apispec @ https://github.com/webdevelop-pro/aiohttp-apispec/archive/4d9aaefc428fc42fe5d1b475ab8c3625c449ee07.tar.gz#sha256=6599745e9f2f288265245cc305228449b7fceaf48c636a8e7322cc61fa2a27e3

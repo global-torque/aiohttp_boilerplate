@@ -1,1 +1,1 @@
-aiohttp-boilerplate==0.9.0
+aiohttp-boilerplate==0.9.1

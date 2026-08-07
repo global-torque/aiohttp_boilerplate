@@ -1,9 +1,8 @@
 aiohttp>=3.14.3,<3.15
 aiohttp-cors>=0.8.1,<0.9
 asyncpg>=0.31,<0.32
-marshmallow>=3.26.2,<4
+marshmallow>=4.3,<5
 marshmallow-jsonschema>=0.16,<0.17
 PyJWT>=2.13,<3
-ujson>=5.13,<6
 python-json-logger>=4.1,<5
-aiohttp-apispec @ https://github.com/webdevelop-pro/aiohttp-apispec/archive/4d9aaefc428fc42fe5d1b475ab8c3625c449ee07.tar.gz#sha256=6599745e9f2f288265245cc305228449b7fceaf48c636a8e7322cc61fa2a27e3
+aiohttp-apispec @ https://raw.githubusercontent.com/global-torque/aiohttp-apispec/ba9fa3c75e826f322b30a78c9d8efd4cd0cc4814/dist/3.1.0/aiohttp_apispec-3.1.0-py3-none-any.whl#sha256=2f0519227147d1e9518115e3ba33ec7a493023b90b5e50e638b9f745c08a0c1f

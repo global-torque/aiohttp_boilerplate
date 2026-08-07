@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from aiohttp import web
-from marshmallow import Schema, fields, post_dump
+from aiohttp_apispec import request_schema, response_schema, setup_aiohttp_apispec
+from marshmallow import Schema, ValidationError, fields, post_dump
 
-from aiohttp_boilerplate.schemas.fields import JoinNested
+from aiohttp_boilerplate.schemas.fields import Choice, JoinNested
+from aiohttp_boilerplate.schemas.validators import DateRangeYears
 from aiohttp_boilerplate.test_utils.load_fixtures import LoadFixture
 from aiohttp_boilerplate.views.mixins import CacheMixin
 from aiohttp_boilerplate.views.options import ObjectView, SchemaOptionsView
@@ -58,6 +61,18 @@ class AccountSchema(Schema):
     def marker(self, data: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         data["serialized"] = True
         return data
+
+
+class MarshmallowCompatibilitySchema(Schema):
+    status = Choice(["pending", "active"], required=True)
+    started_on = fields.Date(validate=DateRangeYears(2020, 2025), required=True)
+    address = JoinNested(
+        nested=AddressSchema,
+        table="addresses",
+        joinOn="id = t0.address_id",
+        joinType="LEFT JOIN",
+        required=True,
+    )
 
 
 def schema_view() -> SchemaOptionsView:
@@ -117,6 +132,62 @@ def test_join_nested_requires_both_structural_values() -> None:
         JoinNested(nested=AddressSchema, joinOn="id = t0.address_id")
 
 
+def test_marshmallow_four_load_dump_validation_and_json_schema() -> None:
+    schema = MarshmallowCompatibilitySchema()
+    loaded = schema.load(
+        {
+            "status": "active",
+            "started_on": "2024-06-30",
+            "address": {"city": "Madrid"},
+        }
+    )
+
+    assert loaded == {
+        "status": "active",
+        "started_on": date(2024, 6, 30),
+        "address": {"city": "Madrid"},
+    }
+    assert schema.dump(loaded) == {
+        "status": "active",
+        "started_on": "2024-06-30",
+        "address": {"city": "Madrid"},
+    }
+    with pytest.raises(ValidationError):
+        schema.load(
+            {
+                "status": "unknown",
+                "started_on": "2026-01-01",
+                "address": {"city": "Madrid"},
+            }
+        )
+
+    generated = schema_view().json_schema(schema)
+    assert generated["$ref"] == "#/definitions/MarshmallowCompatibilitySchema"
+    compatibility_definition = generated["definitions"]["MarshmallowCompatibilitySchema"]
+    assert compatibility_definition["type"] == "object"
+    assert compatibility_definition["properties"]["address"]["$ref"] == (
+        "#/definitions/AddressSchema"
+    )
+
+
+def test_marshmallow_four_openapi_generation_uses_component_schemas() -> None:
+    @request_schema(MarshmallowCompatibilitySchema)
+    @response_schema(AddressSchema, 200, description="Created")
+    async def create_address(_request: web.Request) -> web.Response:
+        return web.json_response({"city": "Madrid"})
+
+    app = web.Application()
+    app.router.add_post("/addresses", create_address)
+    setup_aiohttp_apispec(app, in_place=True, openapi_version="3.0.3")
+    document = app["swagger_dict"]
+
+    operation = document["paths"]["/addresses"]["post"]
+    request_reference = operation["requestBody"]["content"]["application/json"]["schema"]
+    response_reference = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert request_reference == {"$ref": "#/components/schemas/MarshmallowCompatibility"}
+    assert response_reference == {"$ref": "#/components/schemas/Address"}
+
+
 class RetrievalBase:
     calls = 0
 
@@ -129,6 +200,10 @@ class CachedRetrieval(CacheMixin, RetrievalBase):
     namespace = "accounts"
     cache_ttl = 60
     order_key = "sort"
+
+
+class ExpiringCachedRetrieval(CachedRetrieval):
+    cache_ttl = 0
 
 
 @pytest.mark.asyncio
@@ -188,6 +263,37 @@ async def test_cache_none_identity_bypasses_lookup_and_storage(aiohttp_client) -
 
     assert await first.json() != await second.json()
     assert CachedRetrieval.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_cache_response_is_compact_on_miss_hit_expiry_and_bypass(aiohttp_client) -> None:
+    CachedRetrieval.calls = 0
+    ExpiringCachedRetrieval.calls = 0
+
+    async def retrieve(request: web.Request) -> web.Response:
+        endpoint_class = (
+            ExpiringCachedRetrieval if request.match_info["mode"] == "expiring" else CachedRetrieval
+        )
+        endpoint = endpoint_class()
+        endpoint.request = request
+        endpoint.cache_identity = lambda _request: "alice"
+        return web.Response(text=await endpoint._get(), content_type="application/json")
+
+    app = web.Application()
+    app.router.add_get("/{mode}", retrieve)
+    client = await aiohttp_client(app)
+
+    miss = await client.get("/cached")
+    hit = await client.get("/cached")
+    expired_once = await client.get("/expiring")
+    expired_twice = await client.get("/expiring")
+    bypassed = await client.get("/cached?skip=1")
+
+    assert await miss.text() == '{"calls":1}'
+    assert await hit.text() == '{"calls":1}'
+    assert await expired_once.text() == '{"calls":1}'
+    assert await expired_twice.text() == '{"calls":2}'
+    assert await bypassed.text() == '{"calls":2}'
 
 
 class FixtureConnection:

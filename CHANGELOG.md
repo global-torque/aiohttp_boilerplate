@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.10.0 - 2026-08-07
+
+### Changed
+
+- Replace `ujson` with compact standard-library JSON serialization in the
+  response cache without changing parsed response values.
+- Require Marshmallow 4.3 or newer within the 4.x release line after validating
+  schema loading, dumping, custom fields, nested schemas, JSON Schema, and
+  OpenAPI generation in the framework and `investment-api`.
+- Consume the internal `aiohttp-apispec` fork as a versioned, hash-verified wheel
+  instead of a GitHub-generated source archive.
+
+### Upgrade notes
+
+- Review `docs/migration-0.10.md` before upgrading. This is a compatibility
+  release because Marshmallow 4 removes deprecated APIs even though the
+  framework's public behavior is unchanged.
+
 ## 0.9.1 - 2026-08-07
 
 ### Fixed

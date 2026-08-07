@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 from collections.abc import Callable, Iterable
 from typing import Any, cast
 from urllib.parse import urlencode
 from weakref import WeakKeyDictionary
 
-import ujson as json
 from aiohttp import web
 
 _CACHE_STORES: WeakKeyDictionary[web.Application, dict[str, tuple[float, str]]] = (
@@ -97,7 +97,7 @@ class CacheMixin:
             )
         )
         if not cacheable:
-            return json.dumps(await operation())
+            return json.dumps(await operation(), separators=(",", ":"))
         assert identity is not None
         store = _CACHE_STORES.setdefault(self.request.app, {})
         key = build_cache_key(
@@ -112,7 +112,7 @@ class CacheMixin:
             return cached[1]
         if cached is not None:
             store.pop(key, None)
-        value = json.dumps(await operation())
+        value = json.dumps(await operation(), separators=(",", ":"))
         store[key] = (now + self.cache_ttl, value)
         return value
 

@@ -70,4 +70,4 @@ string compared with releases before 0.8.0.
 - [ ] eliminate JSONError exception
 - [ ] Add more examples
 - [ ] Add integration with prometeus
-- [ ] Move to ujson instead of json library
+- [x] Use the standard-library JSON implementation throughout the framework

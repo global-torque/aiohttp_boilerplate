@@ -1,0 +1,7 @@
+include CHANGELOG.md
+include requirements.txt
+include requirements-dev.txt
+include constraints-ci.txt
+recursive-include docs *.md
+recursive-include examples *.py *.txt *.env
+recursive-include tests *.py

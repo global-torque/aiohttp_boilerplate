@@ -1,148 +1,109 @@
-import os
+"""Structured logger without shared request state."""
+
+from __future__ import annotations
+
 import logging
+import os
+import warnings
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from typing import Any
 
-from aiohttp.web import Request
-from aiohttp.web_response import StreamResponse
-from pythonjsonlogger import jsonlogger
-from datetime import datetime
+from pythonjsonlogger.json import JsonFormatter
 
-from aiohttp_boilerplate import config
 from . import formatters
 
-
 GCPSeverityMap = {
-	logging.DEBUG: "DEBUG",
-	logging.INFO:  "INFO",
-    logging.WARNING:  "WARNING",
-    logging.ERROR:  "ERROR",
-	logging.CRITICAL: "CRITICAL",
+    logging.DEBUG: "DEBUG",
+    logging.INFO: "INFO",
+    logging.WARNING: "WARNING",
+    logging.ERROR: "ERROR",
+    logging.CRITICAL: "CRITICAL",
 }
 
-class GCPLogger(logging.Logger):
-    request: Request
-    response: StreamResponse
-    component: str
 
-    def __init__(self, *args, format=None, stack_info=False, stacklevel=3, extra_labels={}, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.component = ""
-        if len(args) > 0:
-            self.component = args[0]
-        self.request = None
-        self.response = None
-        self.context = None
+class GCPLogger(logging.Logger):
+    """Logger that emits one structured event and never stores a request."""
+
+    default_format = "json"
+
+    def __init__(
+        self,
+        name: str,
+        level: int = logging.NOTSET,
+        *,
+        format: str | None = None,
+        stack_info: bool = False,
+        stacklevel: int = 3,
+        extra_labels: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(name, level)
+        self.format_mode = format or type(self).default_format
         self.default_stack_info = stack_info
         self.default_stacklevel = stacklevel
-        self.extra = extra_labels
-        logHandler = logging.StreamHandler()
-
-        # Only json, colored or txt format is allowed
-        # Output format is hardcoded
-        if format is None:
-            if config.conf is not None and 'log' in config.conf:
-                format = config.conf['log'].get('format', 'json')
-            else:
-                format = "json"
-
-        if format == "json":
-            formatter = jsonlogger.JsonFormatter()
-            logHandler.setFormatter(formatter)
-        elif format == "colored":
-            formatter = formatters.ColoredFormatter(formatters.DEFAULT_MSG_FORMAT)
-            logHandler.setFormatter(formatter)
+        self.extra_labels = dict(extra_labels or {})
+        handler = logging.StreamHandler()
+        if self.format_mode == "json":
+            handler.setFormatter(JsonFormatter())
+        elif self.format_mode == "colored":
+            handler.setFormatter(formatters.ColoredFormatter(formatters.DEFAULT_MSG_FORMAT))
         else:
-            formatter = formatters.TxtFormatter(formatters.DEFAULT_MSG_FORMAT)
-            logHandler.setFormatter(formatter)
+            handler.setFormatter(formatters.TxtFormatter(formatters.DEFAULT_MSG_FORMAT))
+        self.addHandler(handler)
+        self.propagate = False
 
-        self.addHandler(logHandler)
+    def new_component_logger(self, name: str) -> GCPLogger:
+        """Return an independent logger for another component."""
+        return type(self)(
+            name,
+            self.level,
+            format=self.format_mode,
+            stack_info=self.default_stack_info,
+            stacklevel=self.default_stacklevel,
+            extra_labels=self.extra_labels,
+        )
 
-    def new_component_logger(self, name):
-        copy_logger = GCPLogger(name)
-        copy_logger.request = self.request
-        copy_logger.response = self.response
-        copy_logger.context = self.context
-        copy_logger.default_stack_info = self.default_stack_info
-        copy_logger.default_stacklevel = self.default_stacklevel
+    def set_component_name(self, name: str) -> None:
+        """Deprecated mutator retained without changing shared logger state."""
+        warnings.warn(
+            "set_component_name() no longer mutates shared loggers; use "
+            "new_component_logger(name)",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
-        return copy_logger
-
-    def set_component_name(self, name):
-        self.component = name
-
-    def setRequest(self, request: Request):
-        self.request = request
-
-    def setResponse(self, response: StreamResponse):
-        self.response = response
-
-    def setComponent(self, component: str):
-        self.component = component
-
-    def addExtra(self, record, level, extra_args, *args):
-        # list of available keys for google cloud
-        # google/cloud/logging_v2/handlers/handlers.py,CloudLoggingFilter, func filter
-        extra = {
-            "component": self.name,
-            "serviceContext": {
-                **self.extra,
-                **extra_args,
-            },
+    def _structured_extra(self, level: int, supplied: Mapping[str, Any]) -> dict[str, Any]:
+        service_context = {
+            **self.extra_labels,
+            **dict(supplied.get("serviceContext", {}) or {}),
         }
-        if len(args) > 0:
-            if level > logging.INFO:
-                extra["error"] = args[0]
-            else:
-                extra["info"] = args[0]
-        if self.context and self.context.request_id:
-            extra["trace"] = self.context.request_id
-        if self.context and self.context.user:
-            extra["json_fields"]["user"] = self.context.user
-        if self.context and self.context.service_context:
-            extra["json_fields"]["serviceContext"] = self.context.service_context
-        if self.request:
-            extra["serviceContext"]["httpRequest"] = {
-                "method": self.request.method,
-                "url": self.request.path_qs,
-                "userAgent": self.request.headers.get("User-Agent", ""),
-                "referer": self.request.headers.get("referer", ""),
-                # "status": "",
-                "remoteIp": self.request.remote,
-                # "latency": "",
-                "protocol": self.request.scheme
-            }
-            if self.response and hasattr(self.response, 'code'):
-                extra["serviceContext"]["httpRequest"]["responseStatusCode"] = self.response.code
-
-            extra["serviceContext"]["user"] = self.request.headers.get("Authorization")
-        
-            if hasattr(self.request, "context"):
-                if hasattr(self.request.context, "request_id"):
-                    extra["serviceContext"]["request_id"] = self.request.context.request_id
-                if hasattr(self.request.context, "msg_id"):
-                    extra["serviceContext"]["msg_id"] = self.request.context.request_id
-                if hasattr(self.request.context, "extra_data"):
-                    extra["serviceContext"].update(self.request.context.extra_data)
-        if "service_name" not in extra["serviceContext"]:
-            extra["serviceContext"]["service_name"] = os.getenv("SERVICE_NAME")
-
-        # Add severity for GCP monitoring
-        extra["level"] = GCPSeverityMap[level].lower()
-        extra["severity"] = GCPSeverityMap[level]
-        extra["time"] = datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')
-
+        service_context.setdefault("service_name", os.getenv("SERVICE_NAME"))
+        extra = {
+            **dict(supplied),
+            "component": supplied.get("component", self.name),
+            "serviceContext": service_context,
+            "level": GCPSeverityMap.get(level, "INFO").lower(),
+            "severity": GCPSeverityMap.get(level, "INFO"),
+            "time": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        }
         return extra
 
-    def _log(self, level, msg, args, exc_info=None, extra=None, stack_info=None,
-             stacklevel=None):
-        if stack_info is None:
-            stack_info = self.default_stack_info
-
-        if stacklevel is None:
-            stacklevel = self.default_stacklevel
-
-        if extra is None:
-            extra = {}
-
-        extra = self.addExtra(msg, level, extra, *args)
-        args = []
-        return super()._log(level, msg, args, exc_info, extra, stack_info, stacklevel)
+    def _log(
+        self,
+        level: int,
+        msg: object,
+        args: tuple[object, ...] | Mapping[str, object],
+        exc_info: Any = None,
+        extra: Mapping[str, Any] | None = None,
+        stack_info: bool | None = None,
+        stacklevel: int | None = None,
+    ) -> None:
+        super()._log(
+            level,
+            msg,
+            args,
+            exc_info=exc_info,
+            extra=self._structured_extra(level, extra or {}),
+            stack_info=self.default_stack_info if stack_info is None else stack_info,
+            stacklevel=self.default_stacklevel if stacklevel is None else stacklevel,
+        )

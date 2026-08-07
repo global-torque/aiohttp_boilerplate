@@ -1,12 +1,9 @@
-setuptools>=80.0
-uvloop>=0.22.1
-asyncpg>=0.31.0
-aiohttp>=3.14.3,<4.0
-marshmallow>=3.26.2,<4.0
-marshmallow-jsonschema>=0.16.0
-PyJWT>=2.13.0
-ujson>=5.13.0
-aiocache>=0.12.3
-django_environ>=0.14.0
-python-json-logger>=4.1.0
+aiohttp>=3.14.3,<3.15
+aiohttp-cors>=0.8.1,<0.9
+asyncpg>=0.31,<0.32
+marshmallow>=3.26.2,<4
+marshmallow-jsonschema>=0.16,<0.17
+PyJWT>=2.13,<3
+ujson>=5.13,<6
+python-json-logger>=4.1,<5
 aiohttp-apispec @ https://github.com/webdevelop-pro/aiohttp-apispec/archive/refs/tags/v1.0.3.tar.gz

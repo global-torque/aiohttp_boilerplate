@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=80,<84", "wheel>=0.46,<0.48"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aiohttp-boilerplate"
+version = "0.9.0"
+description = "A small aiohttp service framework"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{name = "Pro Webdevelop LLC", email = "vladka@webdevelop.pro"}]
+classifiers = [
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "aiohttp>=3.14.3,<3.15",
+  "aiohttp-cors>=0.8.1,<0.9",
+  "asyncpg>=0.31,<0.32",
+  "marshmallow>=3.26.2,<4",
+  "marshmallow-jsonschema>=0.16,<0.17",
+  "PyJWT>=2.13,<3",
+  "ujson>=5.13,<6",
+  "python-json-logger>=4.1,<5",
+  "aiohttp-apispec @ https://github.com/webdevelop-pro/aiohttp-apispec/archive/refs/tags/v1.0.3.tar.gz",
+]
+
+[project.optional-dependencies]
+uvloop = ["uvloop>=0.22,<0.23; platform_system != 'Windows'"]
+
+[project.urls]
+Homepage = "https://github.com/webdeveloppro/aiohttp_boilerplate"
+
+[tool.setuptools.packages.find]
+include = ["aiohttp_boilerplate*"]
+
+[tool.setuptools.package-data]
+aiohttp_boilerplate = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "aiohttp_boilerplate/test_utils"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+addopts = ["-ra", "--strict-markers"]
+
+[tool.coverage.run]
+branch = true
+source = ["aiohttp_boilerplate"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.black]
+target-version = ["py312", "py313", "py314"]
+line-length = 100
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["aiohttp_cors.*", "aiohttp_apispec.*", "asyncpg.*", "marshmallow_jsonschema.*"]
+ignore_missing_imports = true

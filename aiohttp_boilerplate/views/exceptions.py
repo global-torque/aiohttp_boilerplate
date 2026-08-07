@@ -1,23 +1,58 @@
+"""HTTP exceptions using the framework JSON error envelope."""
+
+from __future__ import annotations
+
 import json
+from collections.abc import Mapping, Sequence
+from typing import Any
+
 from aiohttp import web
 
-from aiohttp_boilerplate.logging import get_logger
-from aiohttp_boilerplate import config
+logger_name = "aiohttp_boilerplate.views"
 
-logger_name = 'aiohttp_boilerplate.views'
 
-logger = get_logger(logger_name)
+def _safe_detail(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): _safe_detail(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return [_safe_detail(item) for item in value]
+    return "Invalid value"
 
-class JSONHTTPError(web.HTTPClientError):
-    def __init__(self, request, message, error_class=web.HTTPBadRequest):
-        """ Helper to parse json and return string """
-        if request is not None:
-            request.log.debug(message)
+
+def error_envelope(status: int, message: str, details: Any = None) -> dict[str, Any]:
+    """Build the documented, serialization-safe error response body."""
+    safe_details = _safe_detail(details)
+    error: dict[str, Any] = {"status": status, "message": message}
+    if safe_details is not None:
+        error["details"] = safe_details
+    return {"error": error}
+
+
+class JSONHTTPError(web.HTTPException):
+    """JSON HTTP exception preserving the requested aiohttp status."""
+
+    def __init__(
+        self,
+        request: web.Request | None,
+        details: Any,
+        error_class: type[web.HTTPException] = web.HTTPBadRequest,
+    ) -> None:
+        status = error_class.status_code
+        reason = error_class().reason
+        self.status_code = status
         self.request = request
-        self.status_code = error_class().status_code
-
-        message = json.dumps(message)
+        if request is not None and hasattr(request, "log"):
+            request.log.debug("request rejected", extra={"status": status})
         super().__init__(
-            text=message,
-            content_type='application/json',
+            text=json.dumps(
+                error_envelope(
+                    status,
+                    reason,
+                    None if status >= 500 else details,
+                )
+            ),
+            content_type="application/json",
+            reason=reason,
         )

@@ -1,336 +1,333 @@
+"""Database-backed models with explicit write scopes."""
+
+from __future__ import annotations
+
+from collections.abc import Iterator, Mapping, Sequence
+from typing import Any, cast
+
 from aiohttp import web
 
-from aiohttp_boilerplate.views import fixed_dump, JSONHTTPError
-from aiohttp_boilerplate.sql import SQL
+from aiohttp_boilerplate.sql import (
+    SQL,
+    SQLException,
+    combine_bound_values,
+    validate_identifier,
+)
+from aiohttp_boilerplate.views import JSONHTTPError
 
 
-# iterator protocol
 class Manager:
+    """Thin model wrapper around :class:`SQL`."""
 
-    def __init__(self, db_pool, is_list=False, storage=None, log=None):
-        self.log = log
-        self.is_list = is_list
-        self.db_pool = db_pool
+    __table__: str
 
-        # ToDo
-        # Rename to self.get_table()
-        self.table = self.__table__  + """ as t0 """
+    def __init__(
+        self, db_pool: Any, is_list: bool = False, storage: type[SQL] | None = None, log: Any = None
+    ) -> None:
+        object.__setattr__(self, "log", log)
+        object.__setattr__(self, "is_list", is_list)
+        object.__setattr__(self, "db_pool", db_pool)
+        object.__setattr__(self, "table", f"{self.__table__} as t0")
+        object.__setattr__(self, "data", [] if is_list else {})
+        self.set_storage(self.table, storage, db_pool)
 
-        if is_list:
-            self.data = []
-        else:
-            self.data = {}
-
-        self.set_storage(self.table, storage, self.db_pool)
-
-    def items(self):
+    def items(self) -> Any:
+        if not isinstance(self.data, dict):
+            raise TypeError("list managers do not expose items()")
         return self.data.items()
 
-    def __getitem__(self, key):
-         return self.data[key]
+    def __getitem__(self, key: Any) -> Any:
+        return self.data[key]
 
-    def set_storage(self, table, storage, db_pool):
-        '''
-        Will set a storage for model
-        Can me postgresql/reddis/anything else
-        '''
-        if storage is None:
-            storage = SQL
-        self.sql = storage(table, db_pool, log=self.log)
+    def __getattr__(self, key: str) -> Any:
+        data = object.__getattribute__(self, "data")
+        if isinstance(data, dict):
+            return data.get(key)
+        raise AttributeError(key)
 
-    def __getattribute__(self, key):
-        try:
-            return super().__getattribute__(key)
-        except AttributeError as err:
-            if key != 'data':
-                if hasattr(self, 'data') is True:
-                    if key in self.data:
-                        return self.data[key]
-                    else:
-                        return None
-
-            raise AttributeError(str(err)) from err
-
-    def __setattr__(self, key, value):
-
-        if key in ['table', 'sql', 'is_list', 'data', 'db_pool']:
-            return super().__setattr__(key, value)
-
-        if hasattr(self, 'is_list') and self.is_list is True:
-            raise Exception('You cannot add proporties for a list')
-
-        # if we created data as a dict or array
-        if hasattr(self, 'data') is True:
-            if key in self.data:
-                self.data[key] = value
-            else:
-                raise Exception(f"{key} property does not exist, please use "
-                                "set_data function first")
-        else:
-            super().__setattr__(key, value)
-
-    def set_data(self, data=None):
-
-        data = data or {}
-
-        if type(data) != dict and hasattr(data, '__class__') is False:
-            raise Exception('data should always be a dict or asyncpg Record class')
-
+    def __setattr__(self, key: str, value: Any) -> None:
+        if key in {"log", "table", "sql", "is_list", "data", "db_pool"} or not hasattr(
+            self, "data"
+        ):
+            object.__setattr__(self, key, value)
+            return
         if self.is_list:
-            for record in data:
-                # new_obj = {}  # not sure  self.__class__()
+            raise AttributeError("cannot set model fields on a list manager")
+        if key not in self.data:
+            raise AttributeError(f"{key} property does not exist; call set_data() first")
+        self.data[key] = value
+
+    def set_storage(self, table: str, storage: type[SQL] | None, db_pool: Any) -> None:
+        storage_type = SQL if storage is None else storage
+        object.__setattr__(self, "sql", storage_type(table, db_pool, log=self.log))
+
+    def set_data(self, data: Any = None) -> None:
+        """Replace model state, including empty reload results."""
+        if self.is_list:
+            records = [] if data is None else data
+            if isinstance(records, Mapping) or not isinstance(records, Sequence):
+                raise TypeError("list manager data must be a sequence of records")
+            models: list[Manager] = []
+            for record in records:
                 new_obj = self.__class__(db_pool=self.db_pool, log=self.log)
                 new_obj.set_data(dict(record))
-                self.data.append(new_obj)
-        else:
-            self.data.update(data)
+                models.append(new_obj)
+            object.__setattr__(self, "data", models)
+            return
+        if data is None:
+            object.__setattr__(self, "data", {})
+            return
+        try:
+            copied = dict(data)
+        except (TypeError, ValueError) as exc:
+            raise TypeError("model data must be a mapping or record") from exc
+        object.__setattr__(self, "data", copied)
 
-    def __iter__(self):
-        return self
+    def __iter__(self) -> Iterator[Any]:
+        return iter(self.data)
 
-    def __next__(self): # Python 2: def next(self)
-        self.current += 1
-        if self.current < self.high:
-            return self.current
-        raise StopIteration
-
-    async def get_by_id(self, id, fields="*"):
-
-        if fields != '*' and 'id' not in fields.split(','):
-            fields = 'id,{}'.format(fields)
-
-        await self.select(fields=fields, where='id={id}', params={'id': id})
-
-        if (self.is_list and not self.data) or \
-            (not self.is_list and self.id is None):
-            raise JSONHTTPError(None,
-                {'__error__':['Object %s not found by get_by_id' % self.__class__.__name__]},
+    async def get_by_id(self, id: Any, fields: str = "*") -> Manager:
+        if fields != "*" and "id" not in {item.strip() for item in fields.split(",")}:
+            fields = f"id,{fields}"
+        await self.select(fields=fields, where="id={id}", params={"id": id})
+        if (self.is_list and not self.data) or (not self.is_list and self.data.get("id") is None):
+            raise JSONHTTPError(
+                None,
+                {"object": [f"{self.__class__.__name__} not found"]},
                 web.HTTPNotFound,
             )
-
         return self
 
-    async def get_by(self, fields="*", **filters):
-        """
-            SELECT with AND statement
-        Example:
-            user = await User.get_by(
-                email='XXX'
-                first_name='YYY'
-            )
-        if len(filters.keys()) == 0:
-            raise Exception('Select cannot be empty')
-        """
-
-        if fields != '*' and 'id' not in fields.split(','):
-            fields = f'id,{fields}'
-
-        where = ' AND '.join(['{key}={{{key}}}'.format(key=f) for f in filters.keys()])
-
-        await self.select(
-            fields=fields,
-            where=where,
-            params=filters
-        )
-
-        if (self.is_list and not self.data) or \
-            (not self.is_list and self.id is None):
-            raise JSONHTTPError(None,
-                {'__error__': ['Object %s not found by get_by' % self.__class__.__name__] },
+    async def get_by(self, fields: str = "*", **filters: Any) -> Manager:
+        if not filters:
+            raise SQLException("get_by requires at least one filter")
+        if fields != "*" and "id" not in {item.strip() for item in fields.split(",")}:
+            fields = f"id,{fields}"
+        where = " AND ".join(f"{key}={{{key}}}" for key in filters)
+        await self.select(fields=fields, where=where, params=filters)
+        if (self.is_list and not self.data) or (not self.is_list and self.data.get("id") is None):
+            raise JSONHTTPError(
+                None,
+                {"object": [f"{self.__class__.__name__} not found"]},
                 web.HTTPNotFound,
             )
-
         return self
 
     async def select(
-        self, fields='*', join='', where='', order='', limit='', offset=None, params=None
-    ):
+        self,
+        fields: str = "*",
+        join: str = "",
+        where: str = "",
+        order: str = "",
+        limit: int | str | None = None,
+        offset: int | None = None,
+        params: Mapping[str, Any] | None = None,
+    ) -> Any:
         data = await self.sql.select(
-            fields=fields, join=join, where=where, order=order, limit=limit, offset=offset,
-            params=params, many=self.is_list
+            fields=fields,
+            join=join,
+            where=where,
+            order=order,
+            limit=limit,
+            offset=offset,
+            params=params,
+            many=self.is_list,
         )
         self.set_data(data)
-        # ToDo
-        # select should return length of returned objects from db
         return self
 
-    async def insert(self, data=None, load=0, **kwargs):
-        data = data or {}
-
-        data.update(kwargs)
-        self.set_data(data)
-
-        raw_result = await self.sql.insert(data=data)
-        self.set_data(raw_result)
-
+    async def insert(
+        self, data: Mapping[str, Any] | None = None, load: int = 0, **kwargs: Any
+    ) -> Manager | int:
+        copied = {**dict(data or {}), **kwargs}
+        raw_result = await self.sql.insert(data=copied)
+        merged = {**copied, **dict(raw_result or {})}
+        self.set_data(merged)
         if load == 1:
-            await self.select(where='id={id}', params={'id': self.id})
-
-        # ToDo
-        # insert should return length amount of effected row
+            await self.select(where="id={id}", params={"id": self.id})
         return self
 
-    async def update(self, where='', params=None, data=None, **kwargs):
-        """
-            Example:
-                user = await User.get_by_id(5)
-                user.update(
-                    last_login = datetime.now()
-                )
-                await User().update(
-                    where="email={email} and first_name={f}",
-                    params={'email': 'XXX', 'f': 'YYY'}
-                    data={'first_name': 'NEW NAME'}
-                )
-        """
-        data = data or {}
-        params = params or {}
-        data.update(kwargs)
+    def _write_scope(
+        self, where: str, params: Mapping[str, Any] | None
+    ) -> tuple[str, dict[str, Any]]:
+        copied = dict(params or {})
+        object_id = None if self.is_list else self.data.get("id")
+        if object_id is not None:
+            object_id_key = "__object_id"
+            suffix = 1
+            while object_id_key in copied or f"{{{object_id_key}}}" in where:
+                object_id_key = f"__object_id_{suffix}"
+                suffix += 1
+            where = (
+                f"({where}) AND id={{{object_id_key}}}"
+                if where.strip()
+                else f"id={{{object_id_key}}}"
+            )
+            copied[object_id_key] = object_id
+        if not where.strip() or not copied:
+            raise SQLException("write requires a non-empty scope")
+        return where, copied
 
-        if where == '':
-            if self.id is None:
-                raise JSONHTTPError(
-                    None,
-                    {'__error__':['id is empty dont know how to update']},
-                    web.HTTPBadRequest,
-                )
-            where = "id={id}"
-            params = {'id': self.id}
+    async def update(
+        self,
+        where: str = "",
+        params: Mapping[str, Any] | None = None,
+        data: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> int:
+        copied_data = {**dict(data or {}), **kwargs}
+        scoped_where, scoped_params = self._write_scope(where, params)
+        updated = await self.sql.update(scoped_where, scoped_params, copied_data)
+        if not self.is_list:
+            self.data.update(copied_data)
+        return cast(int, updated)
 
-        updated = await self.sql.update(where=where, params=params, data=data)
-        self.set_data(data)
-        return updated
+    async def delete(self, where: str = "", params: Mapping[str, Any] | None = None) -> int:
+        scoped_where, scoped_params = self._write_scope(where, params)
+        deleted = await self.sql.delete(scoped_where, scoped_params)
+        self.set_data([] if self.is_list else {})
+        return cast(int, deleted)
 
-    async def delete(self, where='', params=None):
-        params = params or {}
-        if self.is_list is False and self.id:
-            where = where + ' id={id}'
-            params['id'] = self.id
-        elif self.is_list:
-            where = where + 'id in ({ids})'
-            params['ids'] = self.list.get_ids()
+    async def update_all(self, data: Mapping[str, Any]) -> int:
+        return cast(int, await self.sql.update_all(data))
 
-        deleted = await self.sql.delete(where=where, params=params)
-        if self.is_list:
-            self.data = []
-        else:
-            self.data = {}
-        return deleted
+    async def delete_all(self) -> int:
+        deleted = await self.sql.delete_all()
+        self.set_data([] if self.is_list else {})
+        return cast(int, deleted)
 
-    async def get_count(self, where='', params=None):
+    async def get_count(self, where: str = "", params: Mapping[str, Any] | None = None) -> int:
+        return cast(int, await self.sql.get_count(where=where, params=params))
 
-        return await self.sql.get_count(where=where, params=params)
-
-    async def is_exists(self, where='', params=None, **kwargs):
-        params = params or {}
-        params.update(kwargs)
-        new_params = params.copy()
-        return await self.sql.is_exists(where, new_params)
+    async def is_exists(
+        self,
+        where: str = "",
+        params: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> bool:
+        copied = {**dict(params or {}), **kwargs}
+        return cast(bool, await self.sql.is_exists(where, copied))
 
 
 class JsonbManager(Manager):
-    # ToDo
-    # Add validation key_name is not None
-    __key_name__ = None
-    __update_type__ = 'update'
+    """Safely mutate one JSONB column using bound payloads and paths."""
 
-    async def select(self, fields='*', where='', order='', limit='', params=None):
+    __key_name__: str | None = None
+    __update_type__ = "update"
 
-        if fields == '*':
-            fields = self.__key_name__
-        data = await self.sql.select(fields=fields, where=where, order=order, limit=limit,
-                                     params=params, many=False)
+    def _key(self) -> str:
+        if self.__key_name__ is None:
+            raise SQLException("JsonbManager.__key_name__ is not configured")
+        return validate_identifier(self.__key_name__, kind="JSONB column")
 
-        # ToDo
-        # Add other fields to the team_members level
-        if data and self.__key_name__ in data:
-            self.set_data(data[self.__key_name__])
-        else:
-            raise JSONHTTPError(
-                None,
-                {'__error__':['No object updated']},
-                web.HTTPBadRequest,
-            )
+    @staticmethod
+    def _scope(where: str, params: Mapping[str, Any]) -> dict[str, Any]:
+        copied = dict(params)
+        if not where.strip() or not copied:
+            raise SQLException("JSONB write requires a non-empty scope")
+        return copied
+
+    async def select(
+        self,
+        fields: str = "*",
+        join: str = "",
+        where: str = "",
+        order: str = "",
+        limit: int | str | None = None,
+        offset: int | None = None,
+        params: Mapping[str, Any] | None = None,
+    ) -> Any:
+        key = self._key()
+        selected = key if fields == "*" else fields
+        data = await self.sql.select(
+            fields=selected,
+            where=where,
+            order=order,
+            limit=limit,
+            params=params,
+            many=False,
+        )
+        if not data or key not in data:
+            raise JSONHTTPError(None, {"object": ["No object updated"]}, web.HTTPBadRequest)
+        self.set_data(data[key])
         return self.data
 
-    async def insert(self, where, params, data):
-        # ToDo
-        # check where is not empty
-        # ToDo
-        # check __update_type_ is not empty and valid
+    async def insert(
+        self,
+        data: Any = None,
+        load: Any = 0,
+        *args: Any,
+        **kwargs: Any,
+    ) -> int:
+        if isinstance(data, str) and isinstance(load, Mapping) and args:
+            where = data
+            params = load
+            data = args[0]
+            args = args[1:]
+        else:
+            where = cast(str, kwargs.pop("where", ""))
+            params = cast(Mapping[str, Any], kwargs.pop("params", {}))
+        if args:
+            raise TypeError("Too many positional JSONB insert arguments")
+        if kwargs:
+            raise TypeError(f"Unsupported JSONB insert arguments: {sorted(kwargs)}")
+        key = self._key()
+        copied = self._scope(where, params)
+        bound = combine_bound_values({"json_data": data}, copied)
+        prepared_where = self.sql.prepare_where(where, copied, 1)
+        if self.__update_type__ == "append":
+            expression = f"jsonb_set({key}, ARRAY[jsonb_array_length({key})::text], $1::jsonb)"
+        elif self.__update_type__ == "update":
+            expression = f"{key} || $1::jsonb"
+        else:
+            raise SQLException(f"Unsupported JSONB update type {self.__update_type__!r}")
+        query = f"UPDATE {self.table} SET {key}={expression} WHERE {prepared_where}"
+        result = await self.sql.execute(query, bound)
+        count = int(result.removeprefix("UPDATE "))
+        if count == 0:
+            raise JSONHTTPError(None, {"object": ["No object updated"]}, web.HTTPBadRequest)
+        return count
 
-        data = fixed_dump(data)
-        query = "update {table} set {key}="
-        if self.__update_type__ == 'append':
-            query += "jsonb_set({key}, concat('{{',"
-            query += " jsonb_array_length({key}),'}}')::text[], '{data}'::jsonb) "
-        elif self.__update_type__ == 'update':
-            query += "{key} || '{data}'"
-
-        query += ' where {where} RETURNING '
-        
-        if self.__update_type__ == 'append':
-            query += 'jsonb_array_length({key}) as r'
-        elif self.__update_type__ == 'update':
-            query += 'id'
-        query = query.format(
-            table=self.table,
-            key=self.__key_name__,
-            data=data.replace("'", "\'"),
-            where=self.sql.prepare_where(where, params)
+    async def update(
+        self,
+        where: str = "",
+        params: Mapping[str, Any] | None = None,
+        data: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> int:
+        copied_data: Any = data if data is not None else kwargs
+        params = params or {}
+        if "index" not in params:
+            return await self.insert(copied_data, where=where, params=params)
+        key = self._key()
+        copied = dict(params)
+        index = copied.pop("index")
+        scoped = self._scope(where, copied)
+        bound = combine_bound_values(
+            {
+                "json_path": [str(index)],
+                "json_data": copied_data,
+            },
+            scoped,
         )
-
-        result = await self.sql.execute(query, params)
-        result = int(result.replace('UPDATE ', ''))
-        if result == 0:
-            raise JSONHTTPError(
-                None,
-                {'__error__':['No object updated']},
-                web.HTTPBadRequest,
-            )
-        return result
-
-    async def update(self, where, params, data):
-
-        # Without INDEX we can do only INSERT
-        # With INDEX we will do UPDATE
-        if 'index' not in params.keys():
-            return await self.insert(where, params, data)
-
-        # ToDo
-        # check where is not empty
-        data = fixed_dump(data)
-
-        # FIXME
-        query = "UPDATE \
-            {table} set {key}=jsonb_set({key}, '{{{index}}}', '{data}'::jsonb) ".format(  # nosec
-            table=self.table,
-            key=self.__key_name__,
-            data=data.replace("'", ""),
-            index=params['index']
+        prepared_where = self.sql.prepare_where(where, scoped, 2)
+        query = (
+            f"UPDATE {self.table} SET {key}=jsonb_set({key}, $1::text[], $2::jsonb) "
+            f"WHERE {prepared_where}"
         )
-        del params['index']
+        result = await self.sql.execute(query, bound)
+        return int(result.removeprefix("UPDATE "))
 
-        query += ' where {where} RETURNING jsonb_array_length({key}) as r'.format(
-            key=self.__key_name__,
-            where=self.sql.prepare_where(where, params)
-        )
-
-        result = await self.sql.execute(query, params)
-        result = int(result.replace('UPDATE ', ''))
-        return result
-
-    async def delete(self, where, params):
-        # FIXME
-        query = "UPDATE {table} SET {key}={key}::jsonb-{index} ".format(  # nosec
-            table=self.table,
-            key=self.__key_name__,
-            index=params['index'],
-        )
-        del params['index']
-        query += "WHERE {where} RETURNING 1 as r".format(
-            where=self.sql.prepare_where(where, params)
-        )
-
-        result = await self.sql.execute(query, params)
-        return int(result.replace('UPDATE ', ''))
+    async def delete(self, where: str = "", params: Mapping[str, Any] | None = None) -> int:
+        key = self._key()
+        copied = dict(params or {})
+        if "index" not in copied:
+            raise SQLException("JSONB delete requires index")
+        index = copied.pop("index")
+        scoped = self._scope(where, copied)
+        bound = combine_bound_values({"json_index": index}, scoped)
+        prepared_where = self.sql.prepare_where(where, scoped, 1)
+        cast = "integer" if isinstance(index, int) else "text"
+        query = f"UPDATE {self.table} SET {key}={key}-$1::{cast} " f"WHERE {prepared_where}"
+        result = await self.sql.execute(query, bound)
+        return int(result.removeprefix("UPDATE "))

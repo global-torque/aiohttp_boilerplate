@@ -1,205 +1,280 @@
 import json
 import warnings
-import marshmallow
+from collections.abc import Mapping
+from contextlib import suppress
+from itertools import count
+from typing import Any, cast
 
+import marshmallow
 from aiohttp import web
+from aiohttp_cors import CorsViewMixin
+from marshmallow import fields as marshmallow_fields
+from marshmallow_jsonschema import JSONSchema
 
 from . import fixed_dump
 from .exceptions import JSONHTTPError
-from marshmallow_jsonschema import JSONSchema
 
 
 # Schema is telling on how to transfer data from SQL to JSON format
-class OptionsView(web.View):
-    """ Base class have implementation of the 'OPTIONS' method
-        Class provide isamorphic way to do validation for front/backed
+class OptionsView(CorsViewMixin, web.View):
+    """Base class have implementation of the 'OPTIONS' method
+    Class provide isamorphic way to do validation for front/backed
     """
 
-    def __init__(self, request):
-        request.log.debug("Init OptionsView")
+    schema: type[marshmallow.Schema] | None = None
+
+    def __init__(self, request: web.Request) -> None:
+        cast(Any, request).log.debug("Init OptionsView")
         super().__init__(request)
-        self.request_data = None
+        self.request_data: Any = None
         self.app = self.request.app
-        self.db_pool = self.request.app.db_pool
+        self.db_pool = cast(Any, self.request.app).db_pool
 
     # On start will always run before any other methods
-    async def on_start(self):
+    async def on_start(self) -> None:
         pass
 
-    async def _fields(self, schema):
+    def _fields(self, schema: marshmallow.Schema) -> dict[str, Any]:
         return {}
 
     # Read data from request and save in request_data
-    async def get_request_data(self, to_json=False):
-        self.request.log.debug(f"Read data from request and save in request_data to_json={to_json}")
+    async def get_request_data(self, to_json: bool = False) -> Any:
+        cast(Any, self.request).log.debug(
+            f"Read data from request and save in request_data to_json={to_json}"
+        )
         if self.request_data is None:
             self.request_data = await self.request.text()
 
         if to_json is True:
-            self.request_data = json.loads(self.request_data)
+            if self.request.content_type != "application/json":
+                raise JSONHTTPError(
+                    self.request,
+                    {"content_type": ["Expected application/json"]},
+                    web.HTTPUnsupportedMediaType,
+                )
+            try:
+                self.request_data = json.loads(self.request_data)
+            except json.JSONDecodeError as err:
+                raise JSONHTTPError(
+                    self.request,
+                    {"json": ["Malformed JSON body"]},
+                    web.HTTPBadRequest,
+                ) from err
 
         return self.request_data
 
-    async def _options(self):
-        return self.json_schema(self.schema()) if hasattr(self, 'schema') \
-            and self.schema is not None else {}
+    async def _options(self) -> dict[str, Any]:
+        return (
+            self.json_schema(self.schema())
+            if hasattr(self, "schema") and self.schema is not None
+            else {}
+        )
 
     # Will return options request with fields meta data
-    async def options(self):
+    async def options(self) -> web.Response:
         return self.json_response(await self._options())
 
     @staticmethod
-    def json_response(data, status=200):
+    def json_response(data: Any, status: int = 200) -> web.Response:
         return web.json_response(
             data,
             dumps=fixed_dump,
             status=status,
         )
 
+    def json_schema(self, schema: marshmallow.Schema) -> dict[str, Any]:
+        return JSONSchema().dump(schema)
+
 
 # Options request with a schema data
 class SchemaOptionsView(OptionsView):
 
-    def __init__(self, request):
+    obj: Any
+
+    def __init__(self, request: web.Request) -> None:
         super().__init__(request)
         self.schema = self.get_schema()
 
-    def get_schema(self):
-        self.request.log.warn('Redefine get_schema in inherited class', RuntimeWarning)
+    def get_schema(self) -> type[marshmallow.Schema] | None:
+        warnings.warn(
+            "Redefine get_schema in inherited class",
+            RuntimeWarning,
+            stacklevel=2,
+        )
         return None
 
-    async def get_schema_data(self, partial=False, schema=None):
+    async def get_schema_data(
+        self,
+        partial: bool = False,
+        schema: type[marshmallow.Schema] | None = None,
+    ) -> dict[str, Any]:
         if schema is None:
             schema = self.schema
 
-        self.request.log.debug(f"schema={schema}")
+        cast(Any, self.request).log.debug("load schema input")
 
+        if self.request.content_type != "application/json":
+            raise JSONHTTPError(
+                self.request,
+                {"content_type": ["Expected application/json"]},
+                web.HTTPUnsupportedMediaType,
+            )
         data = await self.get_request_data()
         if not data:
-            raise JSONHTTPError(self.request, {'__error__': ['Empty data']})
+            raise JSONHTTPError(self.request, {"__error__": ["Empty data"]})
 
-        self.request.log.debug(f"validate data=${data}, partial=${partial}")
+        cast(Any, self.request).log.debug("validate schema input", extra={"partial": partial})
+        if schema is None:
+            raise RuntimeError("SchemaOptionsView requires a schema")
         try:
             schema_result = schema().loads(data, partial=partial)
         except marshmallow.ValidationError as err:
-            raise JSONHTTPError(self.request, err.messages)
-        except Exception as err:
-            raise JSONHTTPError(self.request, err)
+            raise JSONHTTPError(self.request, err.messages) from err
+        except (json.JSONDecodeError, TypeError, ValueError) as err:
+            raise JSONHTTPError(self.request, {"json": ["Malformed JSON body"]}) from err
 
+        if not isinstance(schema_result, dict):
+            raise RuntimeError("schema load must return a mapping")
         return schema_result
 
-     # Return json schema for marshmellow form)
-    def json_schema(self, schema):
+    # Return json schema for marshmellow form)
+    def json_schema(self, schema: marshmallow.Schema) -> dict[str, Any]:
         json_schema = JSONSchema()
         return json_schema.dump(schema)
 
     # Will return options request with validation data for a frontend
-    def _getValidation(self, field):
-        rules = {}
+    def _getValidation(self, field: Any) -> dict[str, Any]:
+        rules: dict[str, Any] = {}
 
-        if getattr(field, 'get_validation', None):
-            return field.get_validation()
+        if getattr(field, "get_validation", None):
+            return cast(dict[str, Any], field.get_validation())
 
         if field.validate:
             for v in field.validate:
                 rules_name = v.__class__.__name__
-                if rules_name == 'OneOf':
-                    rules['oneOf'] = 'choices'
-                    rules['choices'] = {}
+                if rules_name == "OneOf":
+                    rules["oneOf"] = "choices"
+                    rules["choices"] = {}
 
                     for i, val in enumerate(v.choices):
                         try:
-                            rules['choices'][val] = v.labels[i]
+                            rules["choices"][val] = v.labels[i]
                         except IndexError:
-                            rules['choices'][val] = val
+                            rules["choices"][val] = val
 
-                elif rules_name == 'Length':
+                elif rules_name == "Length":
                     if v.min:
-                        rules['minLength'] = v.min
+                        rules["minLength"] = v.min
                     if v.max:
-                        rules['maxLength'] = v.max
+                        rules["maxLength"] = v.max
 
-                elif rules_name == 'Range':
+                elif rules_name == "Range":
                     if v.min and v.max:
-                        rules['range'] = [v.min, v.max]
+                        rules["range"] = [v.min, v.max]
                     if v.min:
-                        rules['min'] = v.min
+                        rules["min"] = v.min
                     if v.max:
-                        rules['max'] = v.max
+                        rules["max"] = v.max
                 else:
                     rules[rules_name.lower()] = rules_name
 
         if field.required:
-            rules['required'] = field.required
+            rules["required"] = field.required
 
         return rules
 
     # Return fields information and validation data
-    def _fields(self, schema):
+    def _fields(self, schema: marshmallow.Schema) -> dict[str, Any]:
 
         return {
-            name: {
-                'type': field.__class__.__name__.lower(),
-                'many': field.many,
-                'schema': self._fields(field.schema),
-            } if field.__class__.__name__.lower() == 'nested'
-            else {
-                'type': field.__class__.__name__.lower(),
-                'validate': self._getValidation(field),
-            } for name, field in schema.fields.items()}
+            name: (
+                {
+                    "type": field.__class__.__name__.lower(),
+                    "many": cast(Any, field).many,
+                    "schema": self._fields(cast(Any, field).schema),
+                }
+                if field.__class__.__name__.lower() == "nested"
+                else {
+                    "type": field.__class__.__name__.lower(),
+                    "validate": self._getValidation(field),
+                }
+            )
+            for name, field in schema.fields.items()
+        }
 
     # Check if schema have NestedJoin Fields
-    def schema_have_joins(self):
+    def schema_have_joins(self) -> bool:
         if callable(self.schema):
             schema = self.schema()
             for field in schema.fields:
-                if schema.fields[field].__class__.__name__ == 'JoinNested':
+                if schema.fields[field].__class__.__name__ == "JoinNested":
                     return True
         return False
 
-    def add_fields_from_schema(self, _schema, _index="t0", t_index=1, parent_schema=""):
-        _fields = []
-        aliases = {'t0': ''}
-        sql_tables = ''
+    def add_fields_from_schema(
+        self,
+        _schema: marshmallow.Schema,
+        _index: str = "t0",
+        t_index: int = 1,
+        parent_schema: str = "",
+    ) -> dict[str, Any]:
+        """Build SELECT fields and joins with one monotonic alias allocator."""
+        aliases: dict[str, str] = {"t0": ""}
+        selected: list[str] = []
+        joins: list[str] = []
+        allocator = count(t_index)
 
-        for name, field in sorted(_schema.fields.items()):
-            db_field = field.metadata.get('db_field', ''). \
-                            format(t_index=_index) or f"{_index}.{name}"
-
-            if field.__class__.__name__ == 'JoinNested':
-                sql_tables += "{} {} as t{} on {}.{} ".format(
-                    field.joinType,
-                    field.table,
-                    t_index,
-                    't%d' % t_index,
-                    field.joinOn
+        def visit(schema: marshmallow.Schema, table_alias: str, output_path: str) -> None:
+            for name, field in schema.fields.items():
+                if field.load_only:
+                    continue
+                db_field = field.metadata.get("db_field", None)
+                if db_field is False:
+                    continue
+                if field.__class__.__name__ == "JoinNested":
+                    join_field = cast(Any, field)
+                    if not join_field.table or not join_field.joinOn:
+                        raise ValueError(f"JoinNested {name} requires table and joinOn")
+                    alias = f"t{next(allocator)}"
+                    aliases[alias] = f"{output_path}.{name}" if output_path else name
+                    joins.append(
+                        f"{join_field.joinType} {join_field.table} as {alias} "
+                        f"on {alias}.{join_field.joinOn}"
+                    )
+                    visit(join_field.nested(), alias, aliases[alias])
+                    continue
+                if isinstance(
+                    field,
+                    (
+                        marshmallow_fields.Method,
+                        marshmallow_fields.Function,
+                        marshmallow_fields.Constant,
+                    ),
+                ):
+                    continue
+                source_name = field.attribute or name
+                expression = (
+                    db_field.format(t_index=table_alias)
+                    if isinstance(db_field, str) and db_field
+                    else f"{table_alias}.{source_name}"
                 )
-                if parent_schema != "":
-                    aliases['t{}'.format(t_index)] = "{}.{}".format(parent_schema, name)
-                else:
-                    aliases['t{}'.format(t_index)] = name
-                nested_data = self.add_fields_from_schema(field.nested(), 't%d' % t_index, t_index + 1, aliases["t{}".format(t_index)])
-                _fields.append(nested_data["fields"])
-                aliases.update(nested_data["aliases"])
-                sql_tables += nested_data["sql_tables"]
-                t_index += 1
-            else:
-                if not field.dump_only:
-                    _fields.append(f"{db_field} as {_index}__{name}")
+                selected.append(f"{expression} as {table_alias}__{name}")
+
+        visit(_schema, _index, parent_schema)
         return {
-            "fields": ",".join(_fields),
+            "fields": ",".join(selected),
             "aliases": aliases,
-            "sql_tables": sql_tables,
+            "sql_tables": (" " + " ".join(joins) + " " if joins else ""),
         }
 
     # Helper to convert data into beautifull json
-    def join_prepare_fields(self, fields="*"):
-        _fields = []
+    def join_prepare_fields(self, fields: str = "*") -> tuple[dict[str, str], str]:
+        _fields: list[str] = []
 
-        alias = {'t0': ''}
+        alias: dict[str, str] = {"t0": ""}
 
         sql = self.obj.sql
-        if hasattr(self, 'objects'):
+        if hasattr(self, "objects"):
             sql = self.objects.sql
 
         sql.table = self.obj.table
@@ -214,17 +289,19 @@ class SchemaOptionsView(OptionsView):
         return alias, fields
 
     # Make beautiful json output
-    def join_beautiful_output(self, aliases, raw_data):
+    def join_beautiful_output(
+        self, aliases: Mapping[str, str], raw_data: Mapping[str, Any] | None
+    ) -> dict[str, Any]:
 
         if raw_data is None:
             return {}
 
-        temp = {}
+        temp: dict[str, Any] = {}
         for k, v in raw_data.items():
-            d = k.split('__')
+            d = k.split("__")
             if len(d) == 1:
                 temp[k] = v
-            elif aliases[d[0]] == '':
+            elif aliases[d[0]] == "":
                 temp[d[1]] = v
             else:
                 t = temp
@@ -239,55 +316,60 @@ class SchemaOptionsView(OptionsView):
 
 # Options request for a signle object
 class ObjectView(SchemaOptionsView):
-    """ Base class have implementation to work with Single Object
-        schema will be use to save or retrive data from database
-        context will be to keep context of get requests
+    """Base class have implementation to work with Single Object
+    schema will be use to save or retrive data from database
+    context will be to keep context of get requests
     """
 
-    def __init__(self, request):
+    obj: Any
+
+    def __init__(self, request: web.Request) -> None:
         super().__init__(request)
 
         self.id = None
-        if self.get_model() is None:
-            warnings.warn('get_model return None', RuntimeWarning)
+        model = self.get_model()
+        if model is None:
+            warnings.warn("get_model return None", RuntimeWarning, stacklevel=2)
         else:
-            self.obj = self.get_model()(db_pool=request.app.db_pool, log=request.log)
+            self.obj = model(
+                db_pool=cast(Any, request.app).db_pool,
+                log=cast(Any, request).log,
+            )
 
     # Return model object
-    def get_model(self):
-        warnings.warn('Redefine get_model in inherited class', RuntimeWarning)
+    def get_model(self) -> type[Any] | None:
+        warnings.warn("Redefine get_model in inherited class", RuntimeWarning, stacklevel=2)
         return None
 
     # Return object id from request
-    async def get_id(self):
-        id = self.request.match_info.get('id')
+    async def get_id(self) -> str | int:
+        object_id: str | int | None = self.request.match_info.get("id")
 
-        if id is None:
+        if object_id is None:
             raise JSONHTTPError(self.request, {"__error__": ["No id found"]})
         # ToDo
         # Check if aiohttp can parse string/numeric data
-        try:
-            id = int(id)
-        except ValueError:
-            pass
+        with suppress(ValueError):
+            object_id = int(object_id)
 
-        return id
+        return object_id
 
     # Return context for and object
-    async def get_data(self, obj):
-        self.request.log.debug("Start get_data method for ObjectView", str(obj.data))
+    async def get_data(self, obj: Any) -> dict[str, Any] | list[Any]:
+        cast(Any, self.request).log.debug("serialize object response")
 
         if not self.schema:
-            return self.obj.data
+            return cast(dict[str, Any] | list[Any], self.obj.data)
 
         schema = self.schema()
-        data = {}
+        data: dict[str, Any] = {}
         for name, field in schema.fields.items():
             if field.load_only:
                 continue
-            if name == "data":
-                data[name] = getattr(obj, name)["data"]
-            else:
-                data[name] = getattr(obj, name)
+            source_name = field.attribute or name
+            if isinstance(getattr(obj, "data", None), dict) and source_name in obj.data:
+                data[source_name] = obj.data[source_name]
+            elif hasattr(obj, source_name):
+                data[source_name] = getattr(obj, source_name)
 
-        return schema.dump(data)
+        return cast(dict[str, Any] | list[Any], schema.dump(data))

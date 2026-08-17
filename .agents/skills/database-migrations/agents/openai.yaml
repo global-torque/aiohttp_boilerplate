@@ -1,4 +1,0 @@
-interface:
-  display_name: "Database Migrations"
-  short_description: "Build migrations with application-owned logic"
-  default_prompt: "Use $database-migrations to add or review an i-migration-service migration while keeping business validation in the application layer."

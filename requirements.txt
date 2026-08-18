@@ -1,12 +1,8 @@
-setuptools>=78.1.1
-uvloop>=0.21.0
-asyncpg>=0.30.0
-aiohttp>=3.13,<4.0
-marshmallow>=3.26.1,<4.0
-marshmallow-jsonschema>=0.13.0
-PyJWT>=2.8.0
-ujson>=5.11.0
-aiocache>=0.12.2
-django_environ>=0.11.2
-python-json-logger>=2.0.7
-aiohttp-apispec @ https://github.com/webdevelop-pro/aiohttp-apispec/archive/refs/tags/v1.0.3.tar.gz
+aiohttp>=3.14.3,<3.15
+aiohttp-cors>=0.8.1,<0.9
+asyncpg>=0.31,<0.32
+marshmallow>=4.3,<5
+marshmallow-jsonschema>=0.16,<0.17
+PyJWT>=2.13,<3
+python-json-logger>=4.1,<5
+aiohttp-apispec @ https://raw.githubusercontent.com/global-torque/aiohttp-apispec/ba9fa3c75e826f322b30a78c9d8efd4cd0cc4814/dist/3.1.0/aiohttp_apispec-3.1.0-py3-none-any.whl#sha256=2f0519227147d1e9518115e3ba33ec7a493023b90b5e50e638b9f745c08a0c1f

@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=80,<84", "wheel>=0.46,<0.48"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aiohttp-boilerplate"
+version = "0.10.0"
+description = "A small aiohttp service framework"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{name = "Pro Webdevelop LLC", email = "vladka@webdevelop.pro"}]
+classifiers = [
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "aiohttp>=3.14.3,<3.15",
+  "aiohttp-cors>=0.8.1,<0.9",
+  "asyncpg>=0.31,<0.32",
+  "marshmallow>=4.3,<5",
+  "marshmallow-jsonschema>=0.16,<0.17",
+  "PyJWT>=2.13,<3",
+  "python-json-logger>=4.1,<5",
+  "aiohttp-apispec @ https://raw.githubusercontent.com/global-torque/aiohttp-apispec/ba9fa3c75e826f322b30a78c9d8efd4cd0cc4814/dist/3.1.0/aiohttp_apispec-3.1.0-py3-none-any.whl#sha256=2f0519227147d1e9518115e3ba33ec7a493023b90b5e50e638b9f745c08a0c1f",
+]
+
+[project.optional-dependencies]
+uvloop = ["uvloop>=0.22,<0.23; platform_system != 'Windows'"]
+
+[project.urls]
+Homepage = "https://github.com/webdeveloppro/aiohttp_boilerplate"
+
+[tool.setuptools.packages.find]
+include = ["aiohttp_boilerplate*"]
+
+[tool.setuptools.package-data]
+aiohttp_boilerplate = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "aiohttp_boilerplate/test_utils"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+addopts = ["-ra", "--strict-markers"]
+
+[tool.coverage.run]
+branch = true
+source = ["aiohttp_boilerplate"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.black]
+target-version = ["py312", "py313", "py314"]
+line-length = 100
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["aiohttp_cors.*", "aiohttp_apispec.*", "asyncpg.*", "marshmallow_jsonschema.*"]
+ignore_missing_imports = true

@@ -1,95 +1,72 @@
-import logging
+"""Explicit structured logging configuration."""
 
-import importlib
+from __future__ import annotations
+
+import logging
 import sys
 import threading
-from logging import config as log_config
-from aiohttp_boilerplate.config import get_config
+from collections.abc import Mapping
+from typing import Any
 
 from .gcp_logger import GCPLogger
 
 
-def setup_global_logger(format, level):
+def setup_global_logger(format: str, level: str) -> None:
+    """Configure future named loggers without reading application config."""
+    GCPLogger.default_format = format
     logging.setLoggerClass(GCPLogger)
-    logger = logging.getLogger()
-    logger.setLevel(level.upper())
+    logging.getLogger().setLevel(level.upper())
+
 
 def get_logger(
-        name:str,
-        level:str = None,
-        format:str = None,
-        stack_info:bool = None,
-        stacklevel:int = None,
-        extra_labels:map = {},
-    ):
-
-    if None in (level, format, stack_info, stacklevel):
-        cfg = get_config('log')
-
-        if level is None:
-            level = cfg['level'].upper()
-        if format is None:
-            format = cfg['format']
-        if stacklevel is None:
-            stacklevel = cfg['stacklevel']
-        if stack_info is None:
-            stack_info = cfg['stackinfo']
-
-    logging.root.setLevel(level)
-
-    logger = GCPLogger(name, format=format, stack_info=stack_info, stacklevel=stacklevel, extra_labels=extra_labels)
-    logger.setLevel(level)
-
+    name: str,
+    level: str | int = logging.INFO,
+    format: str = "json",
+    stack_info: bool = False,
+    stacklevel: int = 3,
+    extra_labels: Mapping[str, Any] | None = None,
+) -> GCPLogger:
+    """Create an independently configured structured logger."""
+    numeric_level = (
+        logging._nameToLevel.get(level.upper(), logging.INFO) if isinstance(level, str) else level
+    )
+    logger = GCPLogger(
+        name,
+        format=format,
+        stack_info=stack_info,
+        stacklevel=stacklevel,
+        extra_labels=extra_labels,
+    )
+    logger.setLevel(numeric_level)
     return logger
 
-def _resolve(name):
-    """Resolve a dotted name to a global object."""
-    name = name.split('.')
-    used = name.pop(0)
-    found = importlib.import_module(used)
-    for n in name:
-        used = used + '.' + n
-        try:
-            found = getattr(found, n)
-        except AttributeError:
-            found = importlib.import_module(used)
-    return found
-log_config._resolve = _resolve
+
+def install_exception_hooks() -> None:
+    """Opt in to process-wide uncaught-exception logging hooks."""
+
+    def except_logging(exc_type: type[BaseException], exc_value: BaseException, tb: Any) -> None:
+        logging.error("Uncaught exception", exc_info=(exc_type, exc_value, tb))
+
+    def unraisable_logging(args: Any) -> None:
+        logging.error(
+            args.err_msg or "Unraisable exception",
+            exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+        )
+
+    def threading_except_logging(args: threading.ExceptHookArgs) -> None:
+        exc_info = (
+            (args.exc_type, args.exc_value, args.exc_traceback)
+            if args.exc_value is not None
+            else (None, None, None)
+        )
+        logging.error(
+            "Uncaught threading exception",
+            exc_info=exc_info,
+        )
+
+    sys.excepthook = except_logging
+    sys.unraisablehook = unraisable_logging
+    threading.excepthook = threading_except_logging
 
 
-def except_logging(exc_type, exc_value, exc_traceback):
-    """
-    Log uncaught exceptions using the root logger. This is a function meant to
-    be set as `sys.excepthook` to provide unified logging for regular logs and
-    uncaught exceptions.
-    """
-    logging.error("Uncaught exception",
-                  exc_info=(exc_type, exc_value, exc_traceback))
-sys.excepthook = except_logging
-
-def unraisable_logging(args):
-    """
-    Log unraisable exceptions using the root logger. This is a function meant
-    to be set as `sys.unraisablehook` to provide unified logging for regular
-    logs and unraisable exceptions.
-    """
-    exc_type, exc_value, exc_traceback, err_msg, _ = args
-    default_msg = "Unraisable exception"
-
-    logging.error(err_msg or default_msg,
-                  exc_info=(exc_type, exc_value, exc_traceback))
-
-sys.unraisablehook = unraisable_logging
-
-
-def threading_except_logging(args):
-    """
-    Log uncaught exceptions from different threads using the root logger. This
-    is a function meant to be set as `threading.excepthook` to provide unified
-    logging for regular logs and uncaught exceptions from different threads.
-    """
-    exc_type, exc_value, exc_traceback, _ = args
-    logging.error("Uncaught threading exception",
-                  exc_info=(exc_type, exc_value, exc_traceback))
-
-threading.excepthook = threading_except_logging
+__all__ = ("GCPLogger", "get_logger", "install_exception_hooks", "setup_global_logger")

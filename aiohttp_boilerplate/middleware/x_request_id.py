@@ -1,25 +1,28 @@
-import uuid
+"""Deprecated compatibility exports for request IDs."""
 
-from aiohttp import web
-from ..views import Context
+from aiohttp_boilerplate.middleware.logger_to_request import (
+    REQUEST_ID_HEADER as REQUEST_ID_HEADER_SETTING,
+)
+from aiohttp_boilerplate.middleware.logger_to_request import (
+    get_request_id,
+)
+from aiohttp_boilerplate.middleware.logger_to_request import (
+    logger_to_request as x_request_id,
+)
 
-REQUEST_ID_HEADER_SETTING = "X-Request-Id"
+__all__ = (
+    "GENERATE_REQUEST_ID",
+    "REQUEST_ID_HEADER_SETTING",
+    "generate_id",
+    "get_request_id",
+    "x_request_id",
+)
+
 GENERATE_REQUEST_ID = True
 
-def generate_id():
+
+def generate_id() -> str:
+    """Generate a request ID for legacy callers."""
+    import uuid
+
     return uuid.uuid4().hex
-
-def get_request_id(request:web.Request):
-    request_id = request.headers.get(REQUEST_ID_HEADER_SETTING, None)
-    if not request_id and GENERATE_REQUEST_ID:
-        request_id = generate_id()
-    return request_id
-
-# Get or add request id to the request
-@web.middleware
-async def x_request_id(request:web.Request, handler):
-    if "context" not in request:
-        request.context = Context
-    request.context.request_id = get_request_id(request)
-    response = await handler(request)
-    return response

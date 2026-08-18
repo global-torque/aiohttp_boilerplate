@@ -1,50 +1,53 @@
-import logging
+from typing import Any, cast
+
 from aiohttp import web
 
-from .options import ObjectView
 from .exceptions import JSONHTTPError, logger_name
+from .options import ObjectView
 
 
 class UpdateView(ObjectView):
 
-    def __init__(self, request):
+    def __init__(self, request: web.Request) -> None:
         super().__init__(request)
-        self.log = request.log
-        self.log.set_component_name(logger_name)
+        self.log = cast(Any, request).log.with_component(logger_name)
 
         # Can we update a part of schema data
         self.partial = True
-        self.where = ''
-        self.params = {}
-        self.data = {}
+        self.where = ""
+        self.params: dict[str, Any] = {}
+        self.data: dict[str, Any] = {}
 
-    async def validate(self, data: dict) -> dict:
-        self.log.debug(f"data={data}")
+    async def validate(self, data: dict[str, Any]) -> dict[str, Any]:
+        self.log.debug("validate update data", extra={"field_count": len(data)})
         """ Override that method for custom validation
         """
         return data
 
-    async def perform_update(self, where: str, params: dict, data: dict) -> dict:
-        self.log.debug("Perform update request", f"where={where}, params={params}, data={data}")
-        ''' Runs after:
+    async def perform_update(self, where: str, params: dict[str, Any], data: dict[str, Any]) -> int:
+        self.log.debug(
+            "perform update",
+            extra={"parameter_count": len(params), "field_count": len(data)},
+        )
+        """ Runs after:
                 - successful validation method
                 - before_update method
             Calls obj.update function
-        '''
-        return await self.obj.update(where, params, data)
+        """
+        return cast(int, await self.obj.update(where, params, data))
 
-    async def before_update(self, data: dict) -> dict:
-        self.log.debug(f"data={data}")
-        ''' Runs after:
+    async def before_update(self, data: dict[str, Any]) -> dict[str, Any]:
+        self.log.debug("before update", extra={"field_count": len(data)})
+        """ Runs after:
                 - successful validation method
             If you want to change your data before system calls insert method
             Use this method
-        '''
+        """
         return data
 
-    async def after_update(self, data: dict) -> dict:
-        self.log.debug(f"data={data}")
-        ''' Runs after:
+    async def after_update(self, data: dict[str, Any]) -> dict[str, Any]:
+        self.log.debug("after update", extra={"field_count": len(data)})
+        """ Runs after:
                 - successful validation method
                 - before_create method
                 - perfom_create method
@@ -52,23 +55,27 @@ class UpdateView(ObjectView):
             Do it here
 
             new object data is self.obj
-        '''
+        """
         return data
 
-    async def _patch(self):
-        ''' Post method handler, will run one by one
-            - on_start
-            - get_schema_data/get_data
-            - validate
-            - before_update
-            - perfomupdate
-            - after_update
-            - get_data
-        '''
+    async def after_update_in_transaction(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Override for DB-only work that must commit with the update."""
+        return {}
+
+    async def _patch(self) -> web.Response:
+        """Post method handler, will run one by one
+        - on_start
+        - get_schema_data/get_data
+        - validate
+        - before_update
+        - perfomupdate
+        - after_update
+        - get_data
+        """
 
         await self.on_start()
 
-        data = {}
+        data: dict[str, Any] = {}
         if self.schema:
             data = await self.get_schema_data(partial=self.partial)
         else:
@@ -76,46 +83,30 @@ class UpdateView(ObjectView):
 
         data = await self.validate(data)
         if len(data) == 0:
-            raise JSONHTTPError(self.request, {'__error__': ['No content']}, web.HTTPBadRequest)
+            raise JSONHTTPError(self.request, {"__error__": ["No content"]}, web.HTTPBadRequest)
 
         self.data.update(await self.before_update(data))
-        updated = await self.perform_update(
-            where=self.where,
-            params=self.params,
-            data=self.data,
-        )
-
-        if updated == 0:
-            raise JSONHTTPError(self.request, {'__error__': ['No object updated']}, web.HTTPNotFound)
-
-        self.data.update(await self.after_update(data))
+        async with self.obj.sql.transaction():
+            updated = await self.perform_update(
+                where=self.where,
+                params=self.params,
+                data=self.data,
+            )
+            if updated == 0:
+                raise JSONHTTPError(
+                    self.request, {"__error__": ["No object updated"]}, web.HTTPNotFound
+                )
+            self.data.update(await self.after_update_in_transaction(data) or {})
+        self.data.update(await self.after_update(data) or {})
         response = await self.get_data(self.obj)
         return self.json_response(response)
 
-    async def _put(self):
+    async def _put(self) -> web.Response:
         self.partial = False
-        return await self.patch()
+        return await self._patch()
 
-    async def patch(self):
-        try:
-            return await self._patch()
-        except Exception as err:
-            # show any 4xx errors directly
-            if hasattr(err, 'status_code'):
-                if err.status_code >= 400 and err.status_code < 500:
-                    raise err
+    async def patch(self) -> web.Response:
+        return await self._patch()
 
-            self.log.error(err, exc_info=True)
-            err_msg = 'HTTP Internal Server Error'
-
-            if self.log.level == logging.DEBUG:
-                err_msg = str(err)
-
-            raise JSONHTTPError(
-                self.request,
-                {'__error__': [err_msg]},
-                web.HTTPInternalServerError,
-            ) from err
-
-    async def put(self):
+    async def put(self) -> web.Response:
         return await self._put()

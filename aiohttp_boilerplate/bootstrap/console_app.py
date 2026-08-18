@@ -1,10 +1,13 @@
+from typing import Any
+
+
 class ConsoleApp:
-    conf = {}
-    db_pool = None
-    loop = None
+    conf: Any = {}
+    db_pool: Any = None
+    loop: Any = None
 
 
-def start_console_app(conf, db_pool, loop=None):
+def start_console_app(conf: Any, db_pool: Any, loop: Any = None) -> ConsoleApp:
     # setup application and extensions
     app = ConsoleApp()
     app.conf = conf

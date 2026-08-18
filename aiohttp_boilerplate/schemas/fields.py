@@ -1,67 +1,76 @@
 import json
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
 
-from marshmallow import fields, validate, Schema
+from marshmallow import Schema, fields, validate
 
 
 class JoinNested(fields.Nested):
 
-    def __init__(self, **kwargs):
-        self.table = kwargs.pop('table')
-        self.joinOn = kwargs.pop('joinOn')
-        self.joinType = kwargs.pop('joinType', 'JOIN')
+    def __init__(self, **kwargs: Any) -> None:
+        self.table = kwargs.pop("table", None)
+        self.joinOn = kwargs.pop("joinOn", None)
+        self.joinType = kwargs.pop("joinType", "JOIN")
 
-        if self.joinOn is None and self.table is None:
-            raise Exception(
-                'Please set foreign index name and table name'
-                'for join statement'
-            )
+        if not self.table or not self.joinOn:
+            raise ValueError("JoinNested requires both table and joinOn")
         super().__init__(**kwargs)
 
 
 class Choice(fields.Raw):
-    type = 'choice'
+    type = "choice"
 
-    def get_validation(self):
+    def get_validation(self) -> dict[str, Any]:
         return {
             "required": self.required,
             "oneOf": self.choices,
         }
 
-    def __init__(self, choices, **kwargs):
+    def __init__(self, choices: Sequence[Any], **kwargs: Any) -> None:
         self.choices = choices
-        v = kwargs.pop('validate', [])
+        v = kwargs.pop("validate", [])
 
-        if type(choices) == list:
-            v.append(validate.OneOf(
-                [x['value'] if 'value' in x else x for x in choices],
-                [x['name'] if 'name' in x else x for x in choices],
-            ))
+        if isinstance(choices, list):
+
+            def value(item: Any, key: str) -> Any:
+                return item.get(key, item) if isinstance(item, dict) else item
+
+            v.append(
+                validate.OneOf(
+                    [value(item, "value") for item in choices],
+                    [value(item, "name") for item in choices],
+                )
+            )
         else:
-            v.append(validate.OneOf(
-                [x for x in choices],
-            ))
-        kwargs['validate'] = v
+            v.append(
+                validate.OneOf(
+                    [x for x in choices],
+                )
+            )
+        kwargs["validate"] = v
         super().__init__(**kwargs)
 
 
 class ChoiceConst(Choice):
-    ''' Create choice field from json const array '''
-    type = 'choice'
+    """Create choice field from json const array"""
 
-    def get_validation(self):
+    type = "choice"
+
+    def get_validation(self) -> dict[str, Any]:
         return {
             "required": self.required,
             "oneOf": self.const_file,
         }
 
-    def __init__(self, const_file, const_folder='const', **kwargs):
-        if '.' in const_file:
-            file_name, const_name = const_file.rsplit('.', 1)
+    def __init__(self, const_file: str, const_folder: str = "const", **kwargs: Any) -> None:
+        if "." in const_file:
+            file_name, const_name = const_file.rsplit(".", 1)
         else:
             file_name, const_name = const_file, None
-        file_name = file_name.replace('.', '/')
-        file_path = const_folder + '/' + file_name + '.json'
-        data = json.loads(open(file_path).read())
+        file_name = file_name.replace(".", "/")
+        file_path = const_folder + "/" + file_name + ".json"
+        data = json.loads(Path(file_path).read_text(encoding="utf-8"))
         choices = data.get(const_name, data)
         self.const_file = const_file
         super().__init__(choices, **kwargs)
@@ -90,6 +99,5 @@ class FilerFile(fields.Integer):
         "image/jpeg",
         "image/png",
         "image/webp",
-        "application/vnd.oasis.opendocument.text"
+        "application/vnd.oasis.opendocument.text",
     ]
-

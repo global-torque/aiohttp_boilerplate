@@ -1,18 +1,24 @@
 import datetime
 import decimal
+import ipaddress
 import json
 import types
-import ipaddress
 from functools import partial
+from typing import Any
 
 from .exceptions import JSONHTTPError
 from .request import Context
 
+
 # JSON serialization tuning
-def fix_json(obj):
+def fix_json(obj: Any) -> Any:
     from .. import models
+
     if isinstance(obj, decimal.Decimal):
-        return float(obj)
+        value = format(obj, "f")
+        if "." in value:
+            value = value.rstrip("0").rstrip(".")
+        return "0" if value == "-0" else value
     # ToDo
     # should we install python-dateutils
     # Or just use this hack ?
@@ -20,7 +26,7 @@ def fix_json(obj):
         return obj.isoformat()
     if isinstance(obj, datetime.date):
         return obj.isoformat()
-    if type(obj) == memoryview:
+    if isinstance(obj, memoryview):
         return bytes(obj)
     if isinstance(obj, types.MethodType):
         return obj()
@@ -30,9 +36,9 @@ def fix_json(obj):
         return str(obj)
     # raise an error if its not dict
     if isinstance(obj, dict) is False:
-        raise TypeError('unknown type: ', type(obj), obj)
+        raise TypeError("unknown type: ", type(obj), obj)
 
 
 fixed_dump = partial(json.dumps, indent=None, default=fix_json)
 
-__all__ = ('JSONHTTPError', 'Context', 'fixed_dump', )
+__all__ = ("Context", "JSONHTTPError", "fixed_dump")

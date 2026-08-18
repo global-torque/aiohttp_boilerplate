@@ -1,32 +1,35 @@
 import logging
+from typing import Any, cast
 
-from .unit import UnitTestCase
-from .load_fixtures import LoadFixture
+from aiohttp import web
 
 from aiohttp_boilerplate import config
+from aiohttp_boilerplate import logging as blogging
 from aiohttp_boilerplate.bootstrap import start_web_app
 from aiohttp_boilerplate.dbpool import pg as db
-from aiohttp_boilerplate import logging as blogging
+
+from .load_fixtures import LoadFixture
+from .unit import UnitTestCase
 
 
 class E2ETestCase(UnitTestCase):
-    '''
-        E2E make real database connection
-        Auto fixtures loading
-    '''
-    loaded_fixtures = {}
-    fixtures = {}
+    """
+    E2E make real database connection
+    Auto fixtures loading
+    """
 
-    async def get_application(self):
-        """Override the get_app method to return your application.
-        """
+    loaded_fixtures: dict[str, list[dict[str, Any]]] = {}
+    fixtures: dict[str, str] = {}
+
+    async def get_application(self) -> web.Application:
+        """Override the get_app method to return your application."""
         # it's important to use the loop passed here.
         conf = await config.load_config()
         db_pool = await db.create_pool(
-            conf=conf['postgres'],
+            conf=conf["postgres"],
             loop=self.loop,
         )
-        blogging.setup_global_logger(conf['log']['format'], conf['log']['level'])
+        blogging.setup_global_logger(conf["log"]["format"], conf["log"]["level"])
 
         app = start_web_app(
             conf=conf,
@@ -35,10 +38,11 @@ class E2ETestCase(UnitTestCase):
         )
         return app
 
-    async def setUpAsync(self):
+    async def setUpAsync(self) -> None:
         await super().setUpAsync()
         if len(self.fixtures.keys()) > 0:
-            con = await self.app.db_pool.acquire()
+            db_pool = cast(Any, self.app).db_pool
+            con = await db_pool.acquire()
             # Truncate all the tables first
             for name, path in self.fixtures.items():
                 await self.truncate_table(path, con, name)
@@ -46,11 +50,11 @@ class E2ETestCase(UnitTestCase):
                 self.loaded_fixtures[name] = await self.load_fixture(path, con, name)
                 # print("Loaded: {}: {}".format(path, len(self.loaded_fixtures[name])))
 
-            await self.app.db_pool.release(con)
+            await db_pool.release(con)
 
-    async def truncate_table(self, path, con, name):
+    async def truncate_table(self, path: str, con: Any, name: str) -> None:
 
-        directory, _file = path.rsplit('/', 1)
+        directory, _file = path.rsplit("/", 1)
         fixture = LoadFixture(_file, directory, name)
 
         try:
@@ -58,12 +62,12 @@ class E2ETestCase(UnitTestCase):
                 # print('Loading {}'.format(path))
                 await fixture.truncate(con)
         except Exception as err:
-            logging.error(err)
-            raise Exception("cannot truncate {}, {}".format(path, str(err)))
+            logging.error("fixture truncate failed", extra={"fixture_path": path})
+            raise RuntimeError(f"cannot truncate fixture {path}") from err
 
-    async def load_fixture(self, path, con, name):
+    async def load_fixture(self, path: str, con: Any, name: str) -> list[dict[str, Any]]:
 
-        directory, _file = path.rsplit('/', 1)
+        directory, _file = path.rsplit("/", 1)
         fixture = LoadFixture(_file, directory, name)
 
         try:
@@ -71,7 +75,7 @@ class E2ETestCase(UnitTestCase):
                 # print('Loading {}'.format(path))
                 await fixture.file2db(con)
         except Exception as err:
-            logging.error(err)
-            raise Exception("cannot upload file {}, {}".format(path, str(err)))
+            logging.error("fixture load failed", extra={"fixture_path": path})
+            raise RuntimeError(f"cannot upload fixture {path}") from err
 
         return fixture.data

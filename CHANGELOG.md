@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.1 - 2026-08-19
+
+### Added
+
+- Allow `UpdateView.before_update()` to return an empty mapping for a
+  successful no-op response that skips the transaction and update hooks while
+  serializing the loaded object.
+
 ## 0.10.0 - 2026-08-07
 
 ### Changed

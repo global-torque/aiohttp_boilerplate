@@ -22,6 +22,9 @@ sftp-config.json
 
 # Basics
 *.py[cod]
+*.egg-info/
+/build/
+/dist/
 __pycache__
 
 # Logs

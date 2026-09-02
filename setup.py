@@ -24,13 +24,12 @@ setup(
     license='MIT',
     author='Pro Webdevelop LLC',
     author_email='vladka@webdevelop.pro',
-    description=long_description,
+    description='A small aiohttp service framework',
     long_description=long_description,
     long_description_content_type='text/markdown',
     url='https://github.com/webdeveloppro/aiohttp_boilerplate',
     classifiers=[
         'Programming Language :: Python :: 3.12',
-        "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
     package_data={

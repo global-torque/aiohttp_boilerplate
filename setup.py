@@ -19,6 +19,7 @@ except IndexError:
 setup(
     name=name,
     version=version,
+    python_requires='>=3.11',
     install_requires=install_requires,
     packages=find_packages(),
     license='MIT',
@@ -29,7 +30,10 @@ setup(
     long_description_content_type='text/markdown',
     url='https://github.com/webdeveloppro/aiohttp_boilerplate',
     classifiers=[
+        'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
+        'Programming Language :: Python :: 3.14',
         "Operating System :: OS Independent",
     ],
     package_data={

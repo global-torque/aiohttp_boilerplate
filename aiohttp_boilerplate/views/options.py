@@ -6,7 +6,8 @@ from itertools import count
 from typing import Any, cast
 
 import marshmallow
-from aiohttp import web
+from aiohttp import hdrs, web
+from aiohttp_cors import APP_CONFIG_KEY as CORS_CONFIG_KEY
 from aiohttp_cors import CorsViewMixin
 from marshmallow import fields as marshmallow_fields
 from marshmallow_jsonschema import JSONSchema
@@ -70,9 +71,48 @@ class OptionsView(CorsViewMixin, web.View):
             else {}
         )
 
+    @classmethod
+    def get_request_config(
+        cls, request: web.Request, request_method: str
+    ) -> Mapping[str, Any]:
+        try:
+            return cast(
+                Mapping[str, Any], cast(Any, super()).get_request_config(request, request_method)
+            )
+        except KeyError:
+            # Keep aiohttp's 405 response for unsupported class-view methods.
+            # Preflights must still reject the unsupported requested method.
+            if request.method == hdrs.METH_OPTIONS:
+                raise
+            return {}
+
     # Will return options request with fields meta data
     async def options(self) -> web.Response:
-        return self.json_response(await self._options())
+        cors_enabled = self.request.method == hdrs.METH_OPTIONS and CORS_CONFIG_KEY in self.app
+        preflight = None
+        if cors_enabled and hdrs.ACCESS_CONTROL_REQUEST_METHOD in self.request.headers:
+            preflight = await cast(Any, CorsViewMixin).options(self)
+
+        response = self.json_response(await self._options())
+        if preflight is not None:
+            response.headers.update(preflight.headers)
+        elif cors_enabled and (origin := self.request.headers.get(hdrs.ORIGIN)):
+            # aiohttp-cors leaves every OPTIONS response to class-based views,
+            # including schema requests that are not browser preflights.
+            config = self.get_request_config(self.request, hdrs.METH_OPTIONS)
+            options = config.get(origin, config.get("*"))
+            if options is not None:
+                response.headers[hdrs.ACCESS_CONTROL_ALLOW_ORIGIN] = origin
+                if options.allow_credentials:
+                    response.headers[hdrs.ACCESS_CONTROL_ALLOW_CREDENTIALS] = "true"
+                if options.expose_headers:
+                    exposed = (
+                        response.headers
+                        if options.expose_headers == "*"
+                        else options.expose_headers
+                    )
+                    response.headers[hdrs.ACCESS_CONTROL_EXPOSE_HEADERS] = ",".join(exposed)
+        return response
 
     @staticmethod
     def json_response(data: Any, status: int = 200) -> web.Response:

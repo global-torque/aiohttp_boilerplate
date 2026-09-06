@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.10.2 - 2026-09-06
+
+### Fixed
+
+- Views registered with `app.router.add_view()` return their JSON Schema for
+  plain OPTIONS requests and successful browser preflights. Preflights retain
+  aiohttp-cors origin, method, and header validation; plain browser OPTIONS
+  responses include the configured CORS headers.
+- Unsupported methods on these views return HTTP 405 instead of disconnecting
+  during aiohttp-cors response preparation.
+
+### Usage
+
+- Register schema endpoints with `add_view()` rather than an explicit OPTIONS
+  route. Only inherit the HTTP methods the endpoint should expose; use
+  `ObjectView` instead of `UpdateView` when providing a custom PUT handler that
+  must not also expose PATCH.
+
 ## 0.10.1 - 2026-08-19
 
 ### Added

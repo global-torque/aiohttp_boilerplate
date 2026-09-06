@@ -42,6 +42,23 @@ Set `CORS_ALLOWED_ORIGINS` to comma-separated exact HTTP(S) origins. An empty
 value disables CORS and creates no preflight routes. `DOMAIN` is rejected; list
 each allowed subdomain explicitly. See `docs/migration-0.8.1.md`.
 
+To expose a view's JSON Schema through OPTIONS, register the class once:
+
+```python
+app.router.add_view("/items/{id}", ItemView)
+```
+
+`OptionsView.options()` returns the schema without requiring preflight headers.
+Browser preflights are validated by aiohttp-cors and receive the schema with
+CORS headers. Browser schema requests containing only `Origin` also receive
+the configured CORS headers. Schema OPTIONS works when CORS is disabled.
+Separate explicit OPTIONS routes still conflict with aiohttp-cors.
+
+`add_view()` exposes all HTTP methods implemented or inherited by the class.
+Use `ObjectView` for a custom PUT handler when the inherited PATCH method on
+`UpdateView` is not part of the endpoint's API. Existing method-specific route
+registrations keep their existing aiohttp-cors preflight behavior.
+
 ## Errors, ownership, and compatibility
 
 Errors use `{"error": {"status": ..., "message": ..., "details": ...}}`.

@@ -42,6 +42,9 @@ class UpdateView(ObjectView):
                 - successful validation method
             If you want to change your data before system calls insert method
             Use this method
+
+            Return an empty mapping when the validated request is already
+            reflected by the current object and no update is required.
         """
         return data
 
@@ -86,18 +89,19 @@ class UpdateView(ObjectView):
             raise JSONHTTPError(self.request, {"__error__": ["No content"]}, web.HTTPBadRequest)
 
         self.data.update(await self.before_update(data))
-        async with self.obj.sql.transaction():
-            updated = await self.perform_update(
-                where=self.where,
-                params=self.params,
-                data=self.data,
-            )
-            if updated == 0:
-                raise JSONHTTPError(
-                    self.request, {"__error__": ["No object updated"]}, web.HTTPNotFound
+        if self.data:
+            async with self.obj.sql.transaction():
+                updated = await self.perform_update(
+                    where=self.where,
+                    params=self.params,
+                    data=self.data,
                 )
-            self.data.update(await self.after_update_in_transaction(data) or {})
-        self.data.update(await self.after_update(data) or {})
+                if updated == 0:
+                    raise JSONHTTPError(
+                        self.request, {"__error__": ["No object updated"]}, web.HTTPNotFound
+                    )
+                self.data.update(await self.after_update_in_transaction(data) or {})
+            self.data.update(await self.after_update(data) or {})
         response = await self.get_data(self.obj)
         return self.json_response(response)
 

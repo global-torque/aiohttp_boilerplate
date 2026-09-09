@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.11.0 - 2026-09-09
+
+### Added
+
+- Opt-in `atomic_request_methods` middleware covering application middleware through final response encoding.
+- AtomicViewMixin, AtomicView, AtomicCreateView and AtomicUpdateView, sharing one transaction engine with middleware.
+- Task-owned ContextVar connection borrowing for models/SQL/raw helpers; typed request and read-only view accessors.
+- Rollback-only joins, explicit recovery savepoints, aborted-transaction checks and guarded buffered response
+  completion.
+- Commit callbacks after connection release with database operations prohibited; successful HTTP control-flow
+  normalization.
+- Initialization-free OptionsViewMixin for custom view bases and routing adapters without widening write-method
+  exposure.
+- Real PostgreSQL one-connection strategy, lifecycle, failure, concurrency and compatibility acceptance tests.
+
+### Compatibility
+
+- Both ownership strategies default to disabled; ordinary CRUD and standalone nested SQL transactions retain behavior.
+- Canonical application pool resolution now covers all model view constructors while retaining the existing alias.
+- See [migration guidance](docs/migration-0.11.md), [ADR 0010](docs/adr/0010-http-transaction-ownership.md)
+  and [the example](examples/atomic_transactions.py). Python 3.12–3.14 and the existing dependency range remain
+  supported.
+
+## 0.10.2 - 2026-09-06
+
+### Fixed
+
+- Views registered with `app.router.add_view()` return their JSON Schema for
+  plain OPTIONS requests and successful browser preflights. Preflights retain
+  aiohttp-cors origin, method, and header validation; plain browser OPTIONS
+  responses include the configured CORS headers.
+- Unsupported methods on these views return HTTP 405 instead of disconnecting
+  during aiohttp-cors response preparation.
+
+### Usage
+
+- Register schema endpoints with `add_view()` rather than an explicit OPTIONS
+  route. Only inherit the HTTP methods the endpoint should expose; use
+  `ObjectView` instead of `UpdateView` when providing a custom PUT handler that
+  must not also expose PATCH.
+
+## 0.10.1 - 2026-08-19
+
+### Added
+
+- Allow `UpdateView.before_update()` to return an empty mapping for a
+  successful no-op response that skips the transaction and update hooks while
+  serializing the loaded object.
+
 ## 0.10.0 - 2026-08-07
 
 ### Changed

@@ -4,10 +4,14 @@ import ipaddress
 import json
 import types
 from functools import partial
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .exceptions import JSONHTTPError
 from .request import Context
+
+if TYPE_CHECKING:
+    from .atomic import AtomicCreateView, AtomicUpdateView, AtomicView, AtomicViewMixin
+    from .options import OptionsViewMixin
 
 
 # JSON serialization tuning
@@ -41,4 +45,27 @@ def fix_json(obj: Any) -> Any:
 
 fixed_dump = partial(json.dumps, indent=None, default=fix_json)
 
-__all__ = ("Context", "JSONHTTPError", "fixed_dump")
+
+def __getattr__(name: str) -> Any:
+    # Lazy exports preserve existing model/schema import cycles.
+    if name == "OptionsViewMixin":
+        from .options import OptionsViewMixin
+
+        return OptionsViewMixin
+    if name in {"AtomicViewMixin", "AtomicView", "AtomicCreateView", "AtomicUpdateView"}:
+        from . import atomic
+
+        return getattr(atomic, name)
+    raise AttributeError(name)
+
+
+__all__ = (
+    "Context",
+    "JSONHTTPError",
+    "fixed_dump",
+    "AtomicViewMixin",
+    "AtomicView",
+    "AtomicCreateView",
+    "AtomicUpdateView",
+    "OptionsViewMixin",
+)

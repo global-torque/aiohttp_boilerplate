@@ -40,7 +40,7 @@ class ListView(RetrieveView):
             raise RuntimeError("ListView requires a model")
         return model(
             is_list=True,
-            db_pool=cast(Any, self.request.app).db_pool,
+            db_pool=self.db_pool,
             log=self.log,
         )
 

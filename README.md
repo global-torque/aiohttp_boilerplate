@@ -1,6 +1,6 @@
 # aiohttp-boilerplate
 
-Version 0.9 supports CPython 3.12–3.14. Applications are created explicitly:
+Version 0.11 supports CPython 3.12–3.14. Applications are created explicitly:
 
 ```python
 from aiohttp_boilerplate.bootstrap import create_app
@@ -58,6 +58,27 @@ Separate explicit OPTIONS routes still conflict with aiohttp-cors.
 Use `ObjectView` for a custom PUT handler when the inherited PATCH method on
 `UpdateView` is not part of the endpoint's API. Existing method-specific route
 registrations keep their existing aiohttp-cors preflight behavior.
+
+## Atomic requests and views
+
+Enable whole-request transactions with application configuration:
+
+```python
+config = AppConfig.from_mapping({
+    "app_dir": "app",
+    "atomic_request_methods": ("POST", "PUT", "PATCH", "DELETE"),
+})
+```
+
+Middleware covers application middleware, authentication, model/raw database work, hooks and final JSON encoding.
+For individual views, use `AtomicView`, `AtomicCreateView` or `AtomicUpdateView`; custom bases can add
+`AtomicViewMixin` first. Middleware and views share one connection/transaction when combined. Both are disabled by
+default for existing consumers. Atomic selection never creates routes or adds HTTP methods.
+
+Models borrow automatically. Use `acquire_connection(pool)` for raw helpers, `self.conn` or
+`get_request_connection(request)` for scoped access, and `on_commit(callback)` for cache invalidation after release.
+Read the [migration guide](docs/migration-0.11.md) for response buffering, task ownership, recovery savepoints,
+callbacks, custom DELETE and final routing adapter examples, and the middleware-versus-view boundary.
 
 ## Errors, ownership, and compatibility
 

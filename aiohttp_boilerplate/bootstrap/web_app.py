@@ -18,6 +18,8 @@ from aiohttp_boilerplate.dbpool import pg as db
 from aiohttp_boilerplate.middleware.defaults import erase_header_server
 from aiohttp_boilerplate.middleware.errors import json_error_middleware
 from aiohttp_boilerplate.middleware.logger_to_request import logger_to_request
+from aiohttp_boilerplate.middleware.transactions import atomic_request_middleware
+from aiohttp_boilerplate.transactions import install_response_guard
 from aiohttp_boilerplate.views.request import REQUEST_CONTEXT_KEY
 
 DB_POOL_KEY: web.AppKey[Any] = web.AppKey("db_pool", object)
@@ -94,7 +96,7 @@ def _validate_cors_routes(routes: tuple[web.AbstractRoute, ...]) -> None:
             and not issubclass(handler_class, aiohttp_cors.CorsViewMixin)
         ):
             raise RuntimeError(
-                f"View {handler.__name__} for {path} must inherit " "aiohttp_cors.CorsViewMixin"
+                f"View {handler.__name__} for {path} must inherit aiohttp_cors.CorsViewMixin"
             )
         if route.method == hdrs.METH_ANY and not is_view:
             raise RuntimeError(
@@ -196,9 +198,11 @@ def create_app(
             logger_to_request,
             json_error_middleware,
             erase_header_server,
+            atomic_request_middleware,
             *_load_middlewares(validated.middlewares),
         ]
     )
+    install_response_guard(app)
     app[APP_CONFIG_KEY] = validated
     app[SHUTDOWN_TIMEOUT_KEY] = validated.shutdown_timeout
     warnings.warn(

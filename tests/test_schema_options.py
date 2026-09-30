@@ -96,6 +96,13 @@ async def test_plain_options_returns_schema_without_preflight_headers(
             {"name": "Fund", "creation_key": "key-1"},
         ),
         ({}, '{"name": "Fund"}', 200, {"name": "Fund"}),
+        ({}, '{"name": "Fund", "Idempotency-Key": "from-body"}', 200, {"name": "Fund"}),
+        (
+            {"Idempotency-Key": "   "},
+            '{"name": "Fund", "Idempotency-Key": "from-body"}',
+            200,
+            {"name": "Fund"},
+        ),
         (
             {"Idempotency-Key": "k" * 257},
             '{"name": "Fund"}',

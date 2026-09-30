@@ -154,6 +154,14 @@ class SchemaOptionsView(OptionsView):
         )
         return None
 
+    def _get_header_values(self, header_fields: Mapping[str, Header]) -> dict[str, str]:
+        values: dict[str, str] = {}
+        for name, field in header_fields.items():
+            value = self.request.headers.get(field.header, "").strip()
+            if value:
+                values[name] = value
+        return values
+
     async def get_schema_data(
         self,
         partial: bool = False,
@@ -179,16 +187,19 @@ class SchemaOptionsView(OptionsView):
             raise RuntimeError("SchemaOptionsView requires a schema")
         try:
             loader = schema()
-            header_values: dict[str, str] = {}
-            for name, field in loader.load_fields.items():
-                if isinstance(field, Header):
-                    value = self.request.headers.get(field.header, "").strip()
-                    if value:
-                        header_values[name if field.data_key is None else field.data_key] = value
-            # Only a JSON object body receives header values; any other body loads unchanged.
-            body = loader.opts.render_module.loads(data) if header_values else None
-            if isinstance(body, dict):
-                schema_result = loader.load({**body, **header_values}, partial=partial)
+            header_fields = {
+                field.data_key if field.data_key is not None else name: field
+                for name, field in loader.load_fields.items()
+                if isinstance(field, Header)
+            }
+            if header_fields:
+                body = json.loads(data)
+                if isinstance(body, dict):
+                    body = {
+                        name: value for name, value in body.items() if name not in header_fields
+                    }
+                    body = {**body, **self._get_header_values(header_fields)}
+                schema_result = loader.load(body, partial=partial)
             else:
                 schema_result = loader.loads(data, partial=partial)
         except marshmallow.ValidationError as err:

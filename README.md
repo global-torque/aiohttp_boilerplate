@@ -117,10 +117,10 @@ class InvestmentCreate(Schema):
     idempotency_key = Header("Idempotency-Key", validate=validate.Length(max=256))
 ```
 
-`SchemaOptionsView.get_schema_data()`, used by `CreateView` and `UpdateView`, copies each present, non-blank header
-value, stripped, into a JSON object body before loading and replaces a body value with the same key. Validation
-errors are keyed by the header name. Without such a header, or when the body is not a JSON object, the body loads
-unchanged with the existing error responses.
+`SchemaOptionsView.get_schema_data()`, used by `CreateView` and `UpdateView`, loads each present, non-blank header
+value, stripped, into a JSON object body before validation. A body value with the same key is ignored, even when
+the header is absent. Validation errors are keyed by the header name. A body that is not a JSON object keeps its
+existing error response.
 
 # ToDo
 - [ ] Create real simple ToDo example and create example with using different profiles and jsonb fields

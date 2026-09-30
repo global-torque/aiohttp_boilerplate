@@ -1,6 +1,6 @@
 # aiohttp-boilerplate
 
-Version 0.9 supports CPython 3.12–3.14. Applications are created explicitly:
+Version 0.11 supports CPython 3.12–3.14. Applications are created explicitly:
 
 ```python
 from aiohttp_boilerplate.bootstrap import create_app
@@ -41,6 +41,44 @@ values, including whitespace-only strings, are otherwise returned unchanged.
 Set `CORS_ALLOWED_ORIGINS` to comma-separated exact HTTP(S) origins. An empty
 value disables CORS and creates no preflight routes. `DOMAIN` is rejected; list
 each allowed subdomain explicitly. See `docs/migration-0.8.1.md`.
+
+To expose a view's JSON Schema through OPTIONS, register the class once:
+
+```python
+app.router.add_view("/items/{id}", ItemView)
+```
+
+`OptionsView.options()` returns the schema without requiring preflight headers.
+Browser preflights are validated by aiohttp-cors and receive the schema with
+CORS headers. Browser schema requests containing only `Origin` also receive
+the configured CORS headers. Schema OPTIONS works when CORS is disabled.
+Separate explicit OPTIONS routes still conflict with aiohttp-cors.
+
+`add_view()` exposes all HTTP methods implemented or inherited by the class.
+Use `ObjectView` for a custom PUT handler when the inherited PATCH method on
+`UpdateView` is not part of the endpoint's API. Existing method-specific route
+registrations keep their existing aiohttp-cors preflight behavior.
+
+## Atomic requests and views
+
+Enable whole-request transactions with application configuration:
+
+```python
+config = AppConfig.from_mapping({
+    "app_dir": "app",
+    "atomic_request_methods": ("POST", "PUT", "PATCH", "DELETE"),
+})
+```
+
+Middleware covers application middleware, authentication, model/raw database work, hooks and final JSON encoding.
+For individual views, use `AtomicView`, `AtomicCreateView` or `AtomicUpdateView`; custom bases can add
+`AtomicViewMixin` first. Middleware and views share one connection/transaction when combined. Both are disabled by
+default for existing consumers. Atomic selection never creates routes or adds HTTP methods.
+
+Models borrow automatically. Use `acquire_connection(pool)` for raw helpers, `self.conn` or
+`get_request_connection(request)` for scoped access, and `on_commit(callback)` for cache invalidation after release.
+Read the [migration guide](docs/migration-0.11.md) for response buffering, task ownership, recovery savepoints,
+callbacks, custom DELETE and final routing adapter examples, and the middleware-versus-view boundary.
 
 ## Errors, ownership, and compatibility
 

@@ -1,257 +1,167 @@
 ---
 name: database-migrations
-description: Work with WebDevelop/Torque database migrations stored in the sibling i-migration-service repository. Use when adding or reviewing SQL schema/data migrations, choosing and naming PostgreSQL enum types, inserting MIGRATION_* environment values into SQL, choosing migration file names and ordering, updating evm-api local test bootstrap SQL, validating migration hashes/application, or coordinating DB changes with Go services, i-models, admin views, and deployed migration jobs.
+description: >-
+  Build and review Torque PostgreSQL migrations, storage contracts, migration
+  ordering and hash validation across services. Keep business validation in
+  applications and use explicit processing state with non-null collections.
 ---
 
 # Database Migrations
 
-## Core Rule
+## Core Rules
 
-Use `../i-migration-service/migrations` as the canonical home for shared database schema and seed changes. Do not create repo-local migrations in the current repository.
+- Use `../i-migration-service/migrations` as the canonical home for shared
+  schema and seed changes. Do not create repo-local copies.
+- Never edit an applied migration. Add a forward migration so stored hashes
+  remain valid across deployed databases.
+- Keep each migration focused on the requested schema transition.
+- Before cross-repository SQL work, read the destination repository's
+  `AGENTS.md`, this skill, and its migration runner contract. Do not let an
+  older caller-repository copy override the destination's current guidance.
+- This package is maintained in `i-migration-service/.agents/skills/database-migrations`.
+  Update installed copies with `scripts/sync_copies.py`; use `--check` to detect drift.
 
-## Database Privilege Approval Gate
+## Golden Rule: Application Owns Logic
 
-Treat SQL statements that change database privileges, roles, memberships, or
-ownership as security-sensitive. This includes:
+Keep business rules and validation in application code. Use PostgreSQL for the
+minimum storage shape and relational integrity the application requires.
 
-- `GRANT` and `REVOKE`.
-- `ALTER DEFAULT PRIVILEGES`.
-- `CREATE ROLE` and `ALTER ROLE`.
-- Role-membership grants.
-- `ALTER ... OWNER TO`.
+Do not add a constraint unless it is necessary. A request to "ensure",
+"validate", or "reject" a value does not imply database enforcement.
 
-Unless the user explicitly requested the exact privilege change, do not write
-or modify SQL containing these statements.
+Keep these in application code by default:
 
-Before requesting approval:
+- formats, regexes, casing, normalization, ranges, and positivity;
+- conditional column combinations, calculations, and rounding;
+- workflow transitions, timestamps, counters, and retry state;
+- blockchain data validation;
+- security evidence, approvals, allowlists, compliance, provider, and policy
+  rules.
 
-1. Inspect existing owners, ACLs, default privileges, runtime roles, and the
-   affected application queries using read-only checks.
-2. Explain why the existing ownership or privilege model does not already
-   cover the required operation.
-3. Present the exact proposed privilege matrix: principal, object, privilege,
-   environment, reason, and rollback.
-4. Ask whether the change should modify database privileges at all, which
-   stable capability role should receive access, and whether the user approves
-   the exact matrix and rollback.
-5. Continue only after explicit approval.
+Limit normal database constraints to required structural integrity: primary
+keys, real foreign keys, database-wide uniqueness/idempotency, universally
+required `NOT NULL`, and small stable enums. Existing checks are not precedent.
+Do not move application logic into triggers, functions, generated columns, or
+domains to bypass this rule.
 
-Never infer privilege-change approval from a general request such as
-"implement this feature", "make deployment work", or "fix the tests". Do not
-automatically grant privileges to shared roles such as `invest_user` or
-`prod_invest_user`, use environment-specific login roles, or add optional-role
-catalog loops without explicit approval.
+Before adding any constraint:
+
+1. Inspect every known writer and its application validation.
+2. Identify the concrete corruption possible without the constraint.
+3. Confirm the invariant applies to every row regardless of workflow,
+   provider, policy, or application version.
+4. Use the smallest structural mechanism that solves the problem.
+
+Treat every new `CHECK` as an exception. Unless the user explicitly requested
+the exact check, pause and ask for approval before writing it. Show the exact
+expression, why application validation is insufficient, affected writers,
+backfill/locking impact, and rollback.
+
+## Privilege Changes
+
+Do not add or change roles, ownership, memberships, `GRANT`, `REVOKE`, or
+default privileges without explicit approval for the exact change. For such a
+task, read [references/database-privileges.md](references/database-privileges.md)
+completely before acting.
 
 ## Workflow
 
-1. Locate the owning directory in `migrations/` folder
+1. Locate the owning directory and sort its files:
 
-2. Pick the next filename by sorting the directory:
+   ```sh
+   find ../i-migration-service/migrations/10_evm_wallets \
+     -maxdepth 1 -type f | sort
+   ```
 
-```sh
-find ../i-migration-service/migrations/10_evm_wallets -maxdepth 1 -type f | sort
-```
+2. Pick the next existing-style numeric prefix. It must sort after current
+   files and exceed the version recorded in target databases when that state is
+   available.
+3. Inspect the affected schema, every writer, i-models, views, and deployment
+   path before writing SQL.
+4. Write the expected transition plainly. Use `ADD COLUMN`, `CREATE TABLE`,
+   `CREATE INDEX`, or `ALTER TYPE` without rerun guards. Use `ADD CONSTRAINT`
+   only after the constraint gate above.
+5. Do not use `IF EXISTS`, `IF NOT EXISTS`, or catalog-driven `DO` blocks to
+   hide ordering errors or schema drift. For a proven legacy repair, read
+   [references/advanced-migrations.md](references/advanced-migrations.md).
+6. Backfill or remove incompatible rows before adding `NOT NULL`, changing a
+   type, or introducing another stricter storage contract.
+7. For a breaking replacement, expand first, migrate code and data second, and
+   contract only in a later migration after old readers/writers are gone.
+8. Update the repository that owns generated models. Keep dependent views
+   compatible until their consumers move.
 
-Use a zero-padded or existing-style numeric prefix that sorts after the current files, then a concise snake-case title, for example `13_add_session_policy_fields.sql`.
+## Types and Enums
 
-3. Write canonical migration SQL to fail on unexpected schema state:
-   - Use plain `ADD COLUMN`, `CREATE TABLE`, `CREATE INDEX`, `ALTER TYPE`, and `ADD CONSTRAINT` in normal migration files.
-   - Do not add `IF NOT EXISTS`, `IF EXISTS`, or catalog guards just to make a migration rerunnable; an already-existing table, column, index, enum value, or constraint usually means migration ordering or DB drift needs attention.
-   - Do not introspect `pg_index`, `pg_attribute`, `pg_constraint`, or similar catalogs to decide between multiple DDL paths in a normal migration.
-   - If a historical repair is truly required, make it a small explicit repair with comments and exact preconditions; fail when the DB is not in the expected legacy shape.
-   - Keep idempotent guards for local Docker bootstrap over old Postgres snapshots, not for canonical migrations.
-   - Backfill old rows explicitly before adding stricter code expectations.
-   - Prefer PostgreSQL enums for small, controlled, stable vocabularies such as workflow statuses and supported chains; follow the enum guidance below.
-   - Prefer exact numeric types for money/token amounts, usually `numeric(78,18)` for token-scale values and `numeric(38,18)` for USD snapshots.
+- Inspect existing schema and model semantics before choosing a numeric type;
+  do not apply a global precision/scale default. Raw units, display amounts,
+  and fiat snapshots have different contracts.
+- Use an enum only for a small, controlled, stable, closed vocabulary. Keep
+  open, provider-defined, or temporary values as text and validate them in the
+  application. Do not use a `CHECK` as a lightweight enum.
+- Name enum types with the smallest unambiguous singular `snake_case_t` name.
+  Reuse a type only for the same semantic domain.
+- When converting text to an enum, verify stored values, drop the old default,
+  cast explicitly with `USING column::text::enum_type`, then restore the
+  default. Remove superseded checks.
 
-4. Prefer expand-and-contract for breaking changes:
-   - Do not drop, rename, or change the type/meaning of an in-use column in the same migration/release that introduces the replacement.
-   - First add the new nullable/defaulted column, enum, table, or view shape beside the old one.
-   - Update application code to tolerate both shapes; for replacements, dual-write old and new fields while reads still use the old source.
-   - Backfill old data into the new structure, then switch reads to the new structure and stop writing the old field.
-   - Drop old columns/tables/views only in a later cleanup migration after production has run without readers/writers for the old shape.
-   - For generated model changes, update the generated/model repo that owns those structs rather than hiding schema assumptions in application code.
-   - For views depending on a changing table, keep old view contracts until all consumers move, or add a compatible new view/columns first; remove old view fields only in the later cleanup step.
+## Nullability and Defaults
 
-5. Check whether local Docker tests need a bootstrap patch:
-   - `docker-compose.yml` mounts `../i-migration-service/migrations` and applies selected newer files on top of a seeded Postgres snapshot.
-   - If tests start from a snapshot older than the new migration and the app/tests need the schema immediately, add an idempotent step to the `migrate` service there.
-   - Keep that bootstrap as a local-test bridge only; the canonical migration still belongs in `i-migration-service`.
+Default required fields to `NOT NULL`. Use a valid default only when it has
+that meaning for every omitted write. Never invent zero IDs, empty strings,
+or sentinel timestamps solely to avoid nullability.
 
-## Enum Types
+Collection columns must use an empty default of the correct shape when no
+entries exist: `jsonb NOT NULL DEFAULT '[]'::jsonb` for a list, or
+`jsonb NOT NULL DEFAULT '{}'::jsonb` for an object. Keep list/object shape
+validation in application code.
 
-Use a PostgreSQL enum when a column represents a closed application contract
-with a small, controlled, and reasonably stable set of values. Good candidates
-include workflow statuses, supported chains, operation kinds, and transaction
-legs. Do not use enums for free-form errors, provider identifiers, hashes,
-event names, source labels, or other externally extensible values.
+Represent processing state explicitly. Do not use a nullable collection to
+encode pending versus processed-empty; use a non-null boolean or a stable
+status alongside it. Write state and data atomically. For example, claim
+allocations use an array plus `claim_business_allocations_recorded`: false
+permits reconstruction, while true includes consumed group members with no
+allocations stored on that effect.
 
-Search existing migrations before creating a type. Reuse an enum only when it
-represents the same semantic domain, not merely because some labels overlap:
+Allow `NULL` only for a distinct optional domain value, or a documented
+transitional migration that cannot populate existing rows yet. A transitional
+exception must include the backfill, compatible-reader/writer rollout, and
+final `SET NOT NULL` step. Inspect existing empty and null values before
+converting them so processing/idempotency semantics survive.
 
-```sql
--- Reuse the canonical chain domain instead of declaring chain as text.
-chain evm_wallet_chain_t NOT NULL DEFAULT 'ethereum'
-```
+## Conditional References
 
-Create a dedicated enum for a distinct state machine:
+- For `${MIGRATION_*}` placeholders, read
+  [references/migration-variables.md](references/migration-variables.md)
+  completely before writing SQL or deployment configuration.
+- For in-file options, enum-value additions, historical repairs, dependent
+  views, or cleanup migrations, read
+  [references/advanced-migrations.md](references/advanced-migrations.md)
+  completely before acting.
 
-```sql
-CREATE TYPE evm_contract_deployment_status_t AS ENUM (
-    'prepared',
-    'token_submitted',
-    'token_mined',
-    'treasury_submitted',
-    'succeeded',
-    'failed',
-    'ambiguous'
-);
+## Apply and Validate
 
-CREATE TABLE evm_contract_deployment_operations (
-    status evm_contract_deployment_status_t NOT NULL DEFAULT 'prepared'
-);
-```
-
-Name enum types in singular `snake_case` with a `_t` suffix. Prefer the
-smallest name that remains unambiguous across the shared database:
-
-- Shared domain: `evm_wallet_chain_t`, `tokenization_engine_t`.
-- Entity-specific attribute: `evm_wallet_operation_status_t`,
-  `payment_provider_operation_status_t`.
-- Keep the column name concise (`chain`, `status`); `_t` belongs only on the
-  type name.
-
-Use canonical labels: lowercase `snake_case` for internal states, existing
-lowercase or kebab-case labels for chains, and established protocol spelling
-when it is part of the domain contract, such as `ERC-20`. Prefer a `CHECK`
-constraint instead when the vocabulary is deliberately open, changes often,
-or contains only a temporary single allowed value.
-
-When converting existing text to an enum, verify and normalize every stored
-value first, then use an explicit cast such as
-`USING status::text::evm_contract_deployment_status_t`. Drop and restore
-dependent defaults or checks as required, and coordinate the type change with
-application models and views.
-
-## Runner Commands
-
-Use the current `i-migration-service` binary/container contract. Set DB env vars from a known local/test environment before running; do not blindly source `.local.env` if it points at shared or live DBs.
+Use only a known local or disposable test database. Do not blindly source an
+environment file that may point to shared or live infrastructure.
 
 ```sh
-cd ../i-migration-service
-
-# Initialize migration tracking tables.
+# Initialize tracking tables only on a fresh database.
 ./app --init
 
-# Apply all unapplied migrations from MIGRATION_DIR.
+# Apply unapplied migrations.
 MIGRATION_DIR=./migrations/ ./app --apply-only=true
+
+# Check stored hashes; optional paths narrow the check.
+./app --check [migration paths...]
 ```
 
-## Dynamic Values In Migration SQL
+`./make.sh test` runs the repository hash check when `DB_*` variables and
+`./app` are available; it has no `unit` or `docker` modes.
 
-Use migration variables when a migration needs a secret or another value that
-must be supplied at execution time. The migration-service process expands
-environment variables matching `MIGRATION_[A-Z0-9_]+` when it applies an
-eligible migration:
+Before finishing:
 
-```sql
-INSERT INTO service_credentials (service_name, api_key, timeout_seconds)
-VALUES ('payments', ${MIGRATION_PAYMENTS_API_KEY}, ${MIGRATION_TIMEOUT_SECONDS}::integer);
-```
-
-Follow these rules:
-
-- Write `${MIGRATION_NAME}` unquoted as a standalone SQL value. Never write
-  `'${MIGRATION_NAME}'`; the runner supplies the PostgreSQL string literal.
-- Use variables only for values. Do not use them as table/column names,
-  identifiers, keywords, operators, or raw SQL fragments.
-- Supply each referenced variable to the migration-service process through its
-  shell, container, or deployment secret configuration. An unset variable is a
-  fatal error before SQL execution; an explicitly set empty value is valid.
-- Add an explicit PostgreSQL cast where useful, such as `::integer`, `::uuid`,
-  or `::jsonb`. PostgreSQL performs the conversion from the rendered string
-  literal.
-- Keep placeholders out of comments, quoted strings, quoted identifiers,
-  dollar-quoted blocks, and function/`DO` bodies. Put the dynamic value in a
-  top-level DML statement. The runner also rejects a placeholder that touches
-  an identifier character.
-- If a variable-bearing migration contains a backslash in an ordinary SQL
-  string, change that string to an explicit `E'...'` escape string so parsing
-  does not depend on `standard_conforming_strings`.
-- A migration skipped by `required_env` does not resolve its variables.
-  Variable-resolution failures remain fatal even with `allow_error: true`.
-
-The migration hash, migration-service logs, `migration_service_logs`, and
-`--final-sql` retain the placeholder rather than the resolved value. This keeps
-hashes stable across environments and avoids persisting the value in runner
-logs. `--final-sql` output containing placeholders is an audit/debug view, not
-SQL that can be executed directly.
-
-The resolved SQL must still reach PostgreSQL. Database statement, error,
-duration, audit, or activity logging can expose a value outside the migration
-runner. Before using this feature for secrets, restrict database roles and
-review server-side logging and `pg_stat_activity` access. Do not use textual
-migration variables when database-side query-text secrecy is mandatory.
-
-## In-File Options
-
-The migration runner supports first-line configuration comments:
-
-```sql
---- allow_error: false, required_env: !master
-```
-
-Use these sparingly. `required_env` is for branch/environment-specific seed or temporary data, not normal schema. Production schema should usually be unconditional. `allow_error: true` is almost never appropriate for structural migrations; prefer deterministic SQL that fails loudly on unexpected state.
-
-### Add An Enum Value
-
-Postgres can reject `ALTER TYPE ... ADD VALUE` inside a transaction block. Keep enum-value additions isolated when possible and document that requirement in the file:
-
-```sql
--- IMPORTANT: ALTER TYPE ... ADD VALUE cannot run inside a transaction block.
-ALTER TYPE tokenization_engine_t ADD VALUE 'ERC-7943';
-```
-
-### Avoid Defensive Catalog Probing
-
-Do use the style with a long `DO $$` block queries `pg_index`/`pg_attribute`/`pg_constraint`. That pattern is bad for canonical migrations because it is hard to read, hides DB drift, accepts multiple incompatible histories, and adds code that should not exist. A migration should state the expected transition:
-
-```sql
-ALTER TABLE evm_wallet_sessions
-    ADD CONSTRAINT evm_wallet_sessions_pkey PRIMARY KEY (id);
-```
-
-If that fails, the failure is useful information. Fix the underlying ordering/state problem or write a deliberately scoped repair migration after understanding the actual legacy state.
-
-### Change A View Around A Table Rewrite
-
-When a table rewrite would break an admin view, split the work:
-
-1. Add a pre-migration dependency file.
-2. Apply the table migration in the owning directory.
-3. Recreate the view later.
-This ordering works because the runner sorts by directory and file names.
-
-### Cleanup Or Cross-Service Migration
-
-For the final cleanup phase of drops, renames, enum slimming, or data shape changes, write the migration as a coordinated release note in SQL comments. Call out the prior migration/code steps that made the cleanup safe:
-
-```sql
--- CLEANUP: drops evm_wallet_operations.wallet_id after:
--- 1. wallet_address was added and backfilled,
--- 2. evm-api/i-models/admin consumers read wallet_address,
--- 3. no deployed writer still writes wallet_id.
-```
-
-Do not bundle the first replacement migration and the final drop in the same feature migration. Do not leave live code writing dropped columns or old enum values.
-
-## Validation
-
-Prefer the repo wrapper for service tests:
-
-```sh
-./make.sh test unit
-./make.sh test docker
-```
-
-Use `./make.sh test docker` when the change affects local container bootstrap or integration-test schema. From `../i-migration-service`, use `./app --check` against a safe local/test DB to catch hash drift. If you cannot run a full apply, at least validate ordering, fail-loud schema assumptions, affected application code, and any local bootstrap changes.
+- run `git diff --check` and confirm migration ordering;
+- apply the migration to a disposable canonical database when practical;
+- verify the resulting columns, types, constraints, and data postconditions;
+- run focused tests in affected services/models;
+- report any unrelated pre-existing hash drift separately.

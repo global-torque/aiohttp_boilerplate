@@ -276,6 +276,22 @@ def canonicalize_origins(value: Any) -> tuple[str, ...]:
     return tuple(origins)
 
 
+def validate_atomic_methods(value: Any) -> tuple[str, ...]:
+    """Accept a unique sequence of uppercase write verbs for either ownership strategy."""
+    if (
+        not isinstance(value, (tuple, list))
+        or any(
+            not isinstance(method, str) or method not in {"POST", "PUT", "PATCH", "DELETE"}
+            for method in value
+        )
+        or len(set(value)) != len(value)
+    ):
+        raise ConfigurationError(
+            "atomic methods must be a unique tuple/list of POST, PUT, PATCH and DELETE"
+        )
+    return tuple(value)
+
+
 @dataclass(frozen=True, slots=True)
 class CorsConfig:
     """Validated exact-origin CORS configuration."""
@@ -378,6 +394,7 @@ class AppConfig(Mapping[str, Any]):
     auth_timeout_total: float = 10.0
     shutdown_timeout: float = 30.0
     middlewares: tuple[str, ...] = ()
+    atomic_request_methods: tuple[str, ...] = ()
     extras: Mapping[str, Any] = field(default_factory=lambda: _immutable_mapping({}))
     _validation_token: object = field(default=None, repr=False, compare=False)
 
@@ -490,6 +507,7 @@ class AppConfig(Mapping[str, Any]):
             "AUTH_TIMEOUT_TOTAL",
             "SHUTDOWN_TIMEOUT",
             "middlewares",
+            "atomic_request_methods",
             "cors",
             "CORS_ALLOWED_ORIGINS",
             "cors_allowed_origins",
@@ -535,6 +553,9 @@ class AppConfig(Mapping[str, Any]):
                 values.get("SHUTDOWN_TIMEOUT", 30.0), setting="SHUTDOWN_TIMEOUT"
             ),
             middlewares=middlewares,
+            atomic_request_methods=validate_atomic_methods(
+                values.get("atomic_request_methods", ())
+            ),
             extras=_immutable_mapping(extras),
             _validation_token=_APP_CONFIG_VALIDATION_TOKEN,
         )
@@ -556,6 +577,7 @@ class AppConfig(Mapping[str, Any]):
             "AUTH_TIMEOUT_TOTAL": self.auth_timeout_total,
             "SHUTDOWN_TIMEOUT": self.shutdown_timeout,
             "middlewares": self.middlewares,
+            "atomic_request_methods": self.atomic_request_methods,
             "CORS_ALLOWED_ORIGINS": self.cors.allowed_origins,
             "CORS_ALLOW_CREDENTIALS": self.cors.allow_credentials,
             "CORS_ALLOW_HEADERS": self.cors.allow_headers,

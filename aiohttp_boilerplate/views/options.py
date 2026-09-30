@@ -6,29 +6,28 @@ from itertools import count
 from typing import Any, cast
 
 import marshmallow
-from aiohttp import web
+from aiohttp import hdrs, web
+from aiohttp_cors import APP_CONFIG_KEY as CORS_CONFIG_KEY
 from aiohttp_cors import CorsViewMixin
 from marshmallow import fields as marshmallow_fields
 from marshmallow_jsonschema import JSONSchema
+
+from aiohttp_boilerplate.transactions import RequestConnectionMixin
 
 from . import fixed_dump
 from .exceptions import JSONHTTPError
 
 
 # Schema is telling on how to transfer data from SQL to JSON format
-class OptionsView(CorsViewMixin, web.View):
+class OptionsViewMixin(RequestConnectionMixin, CorsViewMixin):
     """Base class have implementation of the 'OPTIONS' method
     Class provide isamorphic way to do validation for front/backed
     """
 
     schema: type[marshmallow.Schema] | None = None
 
-    def __init__(self, request: web.Request) -> None:
-        cast(Any, request).log.debug("Init OptionsView")
-        super().__init__(request)
-        self.request_data: Any = None
-        self.app = self.request.app
-        self.db_pool = cast(Any, self.request.app).db_pool
+    request: web.Request
+    request_data: Any
 
     # On start will always run before any other methods
     async def on_start(self) -> None:
@@ -70,9 +69,48 @@ class OptionsView(CorsViewMixin, web.View):
             else {}
         )
 
+    @classmethod
+    def get_request_config(cls, request: web.Request, request_method: str) -> Mapping[str, Any]:
+        try:
+            return cast(
+                Mapping[str, Any], cast(Any, super()).get_request_config(request, request_method)
+            )
+        except KeyError:
+            # Keep aiohttp's 405 response for unsupported class-view methods.
+            # Preflights must still reject the unsupported requested method.
+            if request.method == hdrs.METH_OPTIONS:
+                raise
+            return {}
+
     # Will return options request with fields meta data
     async def options(self) -> web.Response:
-        return self.json_response(await self._options())
+        cors_enabled = (
+            self.request.method == hdrs.METH_OPTIONS and CORS_CONFIG_KEY in self.request.app
+        )
+        preflight = None
+        if cors_enabled and hdrs.ACCESS_CONTROL_REQUEST_METHOD in self.request.headers:
+            preflight = await cast(Any, CorsViewMixin).options(self)
+
+        response = self.json_response(await self._options())
+        if preflight is not None:
+            response.headers.update(preflight.headers)
+        elif cors_enabled and (origin := self.request.headers.get(hdrs.ORIGIN)):
+            # aiohttp-cors leaves every OPTIONS response to class-based views,
+            # including schema requests that are not browser preflights.
+            config = self.get_request_config(self.request, hdrs.METH_OPTIONS)
+            options = config.get(origin, config.get("*"))
+            if options is not None:
+                response.headers[hdrs.ACCESS_CONTROL_ALLOW_ORIGIN] = origin
+                if options.allow_credentials:
+                    response.headers[hdrs.ACCESS_CONTROL_ALLOW_CREDENTIALS] = "true"
+                if options.expose_headers:
+                    exposed = (
+                        response.headers
+                        if options.expose_headers == "*"
+                        else options.expose_headers
+                    )
+                    response.headers[hdrs.ACCESS_CONTROL_EXPOSE_HEADERS] = ",".join(exposed)
+        return response
 
     @staticmethod
     def json_response(data: Any, status: int = 200) -> web.Response:
@@ -86,9 +124,21 @@ class OptionsView(CorsViewMixin, web.View):
         return JSONSchema().dump(schema)
 
 
+class OptionsView(OptionsViewMixin, web.View):
+    """Compatible initialized schema/custom-handler view base."""
+
+    def __init__(self, request: web.Request) -> None:
+        cast(Any, request).log.debug("Init OptionsView")
+        super().__init__(request)
+        self.request_data: Any = None
+        self.app = self.request.app
+        from aiohttp_boilerplate.transactions import application_pool
+
+        self.db_pool = application_pool(self.request.app)
+
+
 # Options request with a schema data
 class SchemaOptionsView(OptionsView):
-
     obj: Any
 
     def __init__(self, request: web.Request) -> None:
@@ -332,7 +382,7 @@ class ObjectView(SchemaOptionsView):
             warnings.warn("get_model return None", RuntimeWarning, stacklevel=2)
         else:
             self.obj = model(
-                db_pool=cast(Any, request.app).db_pool,
+                db_pool=self.db_pool,
                 log=cast(Any, request).log,
             )
 

@@ -10,6 +10,12 @@ from typing import Any
 
 from aiohttp_boilerplate.sql import consts
 from aiohttp_boilerplate.sql.exceptions import logger, logger_name
+from aiohttp_boilerplate.transactions import (
+    TransactionScope,
+    TransactionScopeError,
+    current_scope,
+    joined_transaction,
+)
 
 CUSTOM_TRACE = 5
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -70,17 +76,44 @@ class SQL:
         self.table = validate_table(table)
         self.query = ""
         self.params: dict[str, Any] = {}
-        self.conn: Any = None
+        self._conn: Any = None
         self._transaction_depth = 0
+        self._borrowed_scope: TransactionScope | None = None
         self.log = logger if log is None else log
         if log is not None and hasattr(log, "with_component"):
             self.log = log.with_component(logger_name)
+
+    @property
+    def conn(self) -> Any:
+        """Validate even cached connections before exposing them to callers."""
+        scope = current_scope(self.db_pool)
+        if self._borrowed_scope is not None and self._borrowed_scope is not scope:
+            raise TransactionScopeError("Cached borrowed SQL connection has expired")
+        if scope is not None and self._conn is not None and self._conn is not scope.connection:
+            raise TransactionScopeError("Cached SQL connection conflicts with HTTP transaction")
+        return self._conn
+
+    @conn.setter
+    def conn(self, connection: Any) -> None:
+        scope = current_scope(self.db_pool)
+        if scope is not None and connection is not None and connection is not scope.connection:
+            raise TransactionScopeError("Assigned SQL connection conflicts with HTTP transaction")
+        self._conn = connection
+        self._borrowed_scope = scope if connection is not None else None
 
     def __str__(self) -> str:
         return f"{self.conn} {self.table} {self.query} ({len(self.params)} params)"
 
     async def get_connection(self) -> Any:
-        if self.conn is None:
+        scope = current_scope(self.db_pool)
+        if self._borrowed_scope is not None and self._borrowed_scope is not scope:
+            raise TransactionScopeError("Cached borrowed SQL connection has expired")
+        if scope is not None:
+            if self.conn is not None and self.conn is not scope.connection:
+                raise TransactionScopeError("Cached SQL connection conflicts with HTTP transaction")
+            self._borrowed_scope = scope
+            self.conn = scope.connection
+        elif self.conn is None:
             if self.db_pool is None:
                 raise SQLException("db_pool is not set")
             try:
@@ -114,21 +147,30 @@ class SQL:
 
     async def release(self) -> None:
         if self.conn is not None and self._transaction_depth == 0:
-            await self.db_pool.release(self.conn)
-            self.conn = None
+            if self._borrowed_scope is not None:
+                # Borrowers detach; only the HTTP owner returns this connection.
+                self.conn = None
+                self._borrowed_scope = None
+            else:
+                await self.db_pool.release(self.conn)
+                self.conn = None
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[SQL]:
-        """Reuse one acquired connection for all operations in a transaction."""
-        await self.get_connection()
-        self._transaction_depth += 1
-        try:
-            async with self.conn.transaction():
-                yield self
-        finally:
-            self._transaction_depth -= 1
-            if self._transaction_depth == 0:
-                await self.release()
+        """Join HTTP ownership; standalone nesting retains asyncpg savepoints."""
+        async with joined_transaction(self.db_pool) as scope:
+            await self.get_connection()
+            self._transaction_depth += 1
+            try:
+                if scope is not None:
+                    yield self
+                else:
+                    async with self.conn.transaction():
+                        yield self
+            finally:
+                self._transaction_depth -= 1
+                if self._transaction_depth == 0:
+                    await self.release()
 
     async def execute(
         self,

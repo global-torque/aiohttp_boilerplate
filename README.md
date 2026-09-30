@@ -1,6 +1,6 @@
 # aiohttp-boilerplate
 
-Version 0.11 supports CPython 3.12–3.14. Applications are created explicitly:
+Version 0.12 supports CPython 3.12–3.14. Applications are created explicitly:
 
 ```python
 from aiohttp_boilerplate.bootstrap import create_app
@@ -100,6 +100,27 @@ trailing zeroes are removed, so `Decimal("5001.0")` becomes `"5001"`. Define an
 explicit Marshmallow decimal field when an endpoint needs different formatting.
 This behavior avoids precision loss but changes the JSON type from number to
 string compared with releases before 0.8.0.
+
+## Request header fields
+
+`Header` validates a request header with the view's Marshmallow schema. It is a load-only string field whose
+`data_key` defaults to the header name:
+
+```python
+from marshmallow import Schema, fields, validate
+
+from aiohttp_boilerplate.schemas.fields import Header
+
+
+class InvestmentCreate(Schema):
+    amount = fields.Integer(required=True)
+    idempotency_key = Header("Idempotency-Key", validate=validate.Length(max=256))
+```
+
+`SchemaOptionsView.get_schema_data()`, used by `CreateView` and `UpdateView`, copies each present, non-blank header
+value, stripped, into a JSON object body before loading and replaces a body value with the same key. Validation
+errors are keyed by the header name. Without such a header, or when the body is not a JSON object, the body loads
+unchanged with the existing error responses.
 
 # ToDo
 - [ ] Create real simple ToDo example and create example with using different profiles and jsonb fields

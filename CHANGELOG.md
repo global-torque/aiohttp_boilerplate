@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.12.0 - 2026-09-30
+
+### Added
+
+- `schemas.fields.Header`, a load-only string field that validates a request header through the view's Marshmallow
+  schema. `SchemaOptionsView.get_schema_data()` copies present, non-blank header values into JSON object bodies.
+
+### Compatibility
+
+- Schemas without `Header` fields, requests without the header and bodies that are not JSON objects load unchanged
+  with identical responses. Views need no changes. Python 3.12–3.14 and the dependency range are unchanged.
+
 ## 0.11.0 - 2026-09-09
 
 ### Added

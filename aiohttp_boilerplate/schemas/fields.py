@@ -101,3 +101,13 @@ class FilerFile(fields.Integer):
         "image/webp",
         "application/vnd.oasis.opendocument.text",
     ]
+
+
+class Header(fields.String):
+    """Load-only string that ``SchemaOptionsView.get_schema_data()`` reads from a request header."""
+
+    def __init__(self, header: str, **kwargs: Any) -> None:
+        self.header = header
+        kwargs.setdefault("data_key", header)
+        kwargs.setdefault("load_only", True)
+        super().__init__(**kwargs)

@@ -8,6 +8,7 @@ from marshmallow import Schema, fields, validate
 
 from aiohttp_boilerplate.bootstrap.web_app import create_app
 from aiohttp_boilerplate.config import AppConfig
+from aiohttp_boilerplate.schemas.fields import Header
 from aiohttp_boilerplate.views.options import SchemaOptionsView
 
 bootstrap = importlib.import_module("aiohttp_boilerplate.bootstrap.web_app")
@@ -30,9 +31,23 @@ class CancelView(SchemaOptionsView):
         return web.json_response({"updated": True})
 
 
+class InvestmentCreate(Schema):
+    name = fields.String()
+    creation_key = Header("Idempotency-Key", validate=validate.Length(max=256))
+
+
+class InvestmentCreateView(SchemaOptionsView):
+    def get_schema(self) -> type[Schema]:
+        return InvestmentCreate
+
+    async def post(self) -> web.Response:
+        return self.json_response(await self.get_schema_data())
+
+
 def make_app(monkeypatch, *, cors=True):
     def routes(config, app):
         app.router.add_view("/investment/{id}/cancel", CancelView)
+        app.router.add_view("/investments", InvestmentCreateView)
 
     monkeypatch.setattr(bootstrap, "_load_routes", routes)
     monkeypatch.setattr(bootstrap, "_load_optional_setup", lambda *args: None)
@@ -69,6 +84,49 @@ async def test_plain_options_returns_schema_without_preflight_headers(
     assert await response.json() == {"updated": True}
     for method in ("GET", "PATCH", "POST", "DELETE", "HEAD"):
         assert (await client.request(method, PATH)).status == 405
+
+
+@pytest.mark.parametrize(
+    ("headers", "body", "status", "expected"),
+    [
+        (
+            {"Idempotency-Key": " key-1 "},
+            '{"name": "Fund", "Idempotency-Key": "from-body"}',
+            200,
+            {"name": "Fund", "creation_key": "key-1"},
+        ),
+        ({}, '{"name": "Fund"}', 200, {"name": "Fund"}),
+        ({}, '{"name": "Fund", "Idempotency-Key": "from-body"}', 200, {"name": "Fund"}),
+        (
+            {"Idempotency-Key": "   "},
+            '{"name": "Fund", "Idempotency-Key": "from-body"}',
+            200,
+            {"name": "Fund"},
+        ),
+        (
+            {"Idempotency-Key": "k" * 257},
+            '{"name": "Fund"}',
+            400,
+            {"Idempotency-Key": ["Longer than maximum length 256."]},
+        ),
+        # Bodies that are not JSON objects keep the responses they had before Header fields.
+        ({"Idempotency-Key": "key-1"}, "[]", 400, {"_schema": ["Invalid input type."]}),
+        ({"Idempotency-Key": "key-1"}, "{", 400, {"json": ["Malformed JSON body"]}),
+    ],
+)
+async def test_header_field_is_loaded_and_validated_by_schema(
+    aiohttp_client, monkeypatch, headers, body, status, expected
+):
+    client = await aiohttp_client(make_app(monkeypatch))
+    response = await client.post(
+        "/investments", data=body, headers={"Content-Type": "application/json", **headers}
+    )
+    assert response.status == status
+    assert await response.json() == (
+        expected
+        if status == 200
+        else {"error": {"status": 400, "message": "Bad Request", "details": expected}}
+    )
 
 
 async def test_browser_options_and_preflight_return_schema(aiohttp_client, monkeypatch):

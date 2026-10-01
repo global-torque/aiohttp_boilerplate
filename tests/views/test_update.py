@@ -100,8 +100,10 @@ class NormalUpdateView(NoOpUpdateView):
         return {"after_hook": True}
 
 
-def normal_update_view(updated_rows: int = 1) -> NormalUpdateView:
-    view = object.__new__(NormalUpdateView)
+def normal_update_view(
+    updated_rows: int = 1, view_type: type[NormalUpdateView] = NormalUpdateView
+) -> NormalUpdateView:
+    view = object.__new__(view_type)
     view._request = SimpleNamespace()
     view.schema = None
     view.data = {}
@@ -141,3 +143,30 @@ async def test_zero_row_update_still_returns_not_found() -> None:
     assert view.obj.sql.transaction_probe.exited is True
     assert "transaction_hook" not in view.data
     assert "after_hook" not in view.data
+
+
+class ReplayUpdateView(NormalUpdateView):
+    async def perform_update(
+        self,
+        where: str,
+        params: dict[str, Any],
+        data: dict[str, Any],
+    ) -> int:
+        self.replayed = True
+        self.obj.data = {"id": 7, "name": "original"}
+        return 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["_patch", "_put"])
+async def test_update_replay_skips_hooks_and_accepts_zero_write(method: str) -> None:
+    view = normal_update_view(view_type=ReplayUpdateView)
+    view.replayed = False
+
+    response = await getattr(view, method)()
+
+    assert response.status == 200
+    assert json.loads(response.text) == {"id": 7, "name": "original"}
+    assert view.data == {"name": "unchanged"}
+    assert view.obj.sql.transaction_probe.entered is True
+    assert view.obj.sql.transaction_probe.exited is True

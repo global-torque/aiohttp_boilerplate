@@ -12,6 +12,7 @@ from aiohttp_cors import CorsViewMixin
 from marshmallow import fields as marshmallow_fields
 from marshmallow_jsonschema import JSONSchema
 
+from aiohttp_boilerplate.schemas.fields import Header
 from aiohttp_boilerplate.transactions import RequestConnectionMixin
 
 from . import fixed_dump
@@ -153,6 +154,14 @@ class SchemaOptionsView(OptionsView):
         )
         return None
 
+    def _get_header_values(self, header_fields: Mapping[str, Header]) -> dict[str, str]:
+        values: dict[str, str] = {}
+        for name, field in header_fields.items():
+            value = self.request.headers.get(field.header, "").strip()
+            if value:
+                values[name] = value
+        return values
+
     async def get_schema_data(
         self,
         partial: bool = False,
@@ -177,7 +186,22 @@ class SchemaOptionsView(OptionsView):
         if schema is None:
             raise RuntimeError("SchemaOptionsView requires a schema")
         try:
-            schema_result = schema().loads(data, partial=partial)
+            loader = schema()
+            header_fields = {
+                field.data_key if field.data_key is not None else name: field
+                for name, field in loader.load_fields.items()
+                if isinstance(field, Header)
+            }
+            if header_fields:
+                body = json.loads(data)
+                if isinstance(body, dict):
+                    body = {
+                        name: value for name, value in body.items() if name not in header_fields
+                    }
+                    body = {**body, **self._get_header_values(header_fields)}
+                schema_result = loader.load(body, partial=partial)
+            else:
+                schema_result = loader.loads(data, partial=partial)
         except marshmallow.ValidationError as err:
             raise JSONHTTPError(self.request, err.messages) from err
         except (json.JSONDecodeError, TypeError, ValueError) as err:

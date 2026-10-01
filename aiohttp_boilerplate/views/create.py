@@ -8,12 +8,14 @@ from .options import ObjectView
 
 class CreateView(ObjectView):
     partial = False
+    replayed = False
 
     def __init__(self, request: web.Request) -> None:
         super().__init__(request)
         self.log = cast(Any, request).log.with_component(logger_name)
 
         self.data: dict[str, Any] = {}
+        self.replayed = False
 
     async def validate(self, data: dict[str, Any]) -> dict[str, Any]:
         self.log.debug("validate create data", extra={"field_count": len(data)})
@@ -85,10 +87,12 @@ class CreateView(ObjectView):
         self.data.update(await self.before_create(data))
         async with self.obj.sql.transaction():
             self.obj = await self.perform_create(data=self.data)
-            self.data.update(await self.after_create_in_transaction(data) or {})
-        self.data.update(await self.after_create(data) or {})
+            if not self.replayed:
+                self.data.update(await self.after_create_in_transaction(data) or {})
+        if not self.replayed:
+            self.data.update(await self.after_create(data) or {})
         response = await self.get_data(self.obj)
-        return self.json_response(response, 201)
+        return self.json_response(response, 200 if self.replayed else 201)
 
     async def post(self) -> web.Response:
         """Post logic is in _post method

@@ -7,6 +7,7 @@ from .options import ObjectView
 
 
 class UpdateView(ObjectView):
+    replayed = False
 
     def __init__(self, request: web.Request) -> None:
         super().__init__(request)
@@ -17,6 +18,7 @@ class UpdateView(ObjectView):
         self.where = ""
         self.params: dict[str, Any] = {}
         self.data: dict[str, Any] = {}
+        self.replayed = False
 
     async def validate(self, data: dict[str, Any]) -> dict[str, Any]:
         self.log.debug("validate update data", extra={"field_count": len(data)})
@@ -96,12 +98,14 @@ class UpdateView(ObjectView):
                     params=self.params,
                     data=self.data,
                 )
-                if updated == 0:
+                if updated == 0 and not self.replayed:
                     raise JSONHTTPError(
                         self.request, {"__error__": ["No object updated"]}, web.HTTPNotFound
                     )
-                self.data.update(await self.after_update_in_transaction(data) or {})
-            self.data.update(await self.after_update(data) or {})
+                if not self.replayed:
+                    self.data.update(await self.after_update_in_transaction(data) or {})
+            if not self.replayed:
+                self.data.update(await self.after_update(data) or {})
         response = await self.get_data(self.obj)
         return self.json_response(response)
 

@@ -1,6 +1,6 @@
 # aiohttp-boilerplate
 
-Version 0.11 supports CPython 3.12–3.14. Applications are created explicitly:
+Version 0.12 supports CPython 3.12–3.14. Applications are created explicitly:
 
 ```python
 from aiohttp_boilerplate.bootstrap import create_app
@@ -100,6 +100,39 @@ trailing zeroes are removed, so `Decimal("5001.0")` becomes `"5001"`. Define an
 explicit Marshmallow decimal field when an endpoint needs different formatting.
 This behavior avoids precision loss but changes the JSON type from number to
 string compared with releases before 0.8.0.
+
+## Request header fields
+
+`Header` validates a request header with the view's Marshmallow schema. It is a load-only string field whose
+`data_key` defaults to the header name:
+
+```python
+from marshmallow import Schema, fields, validate
+
+from aiohttp_boilerplate.schemas.fields import Header
+
+
+class InvestmentCreate(Schema):
+    amount = fields.Integer(required=True)
+    idempotency_key = Header("Idempotency-Key", validate=validate.Length(max=256))
+```
+
+`SchemaOptionsView.get_schema_data()`, used by `CreateView` and `UpdateView`, loads each present, non-blank header
+value, stripped, into a JSON object body before validation. A body value with the same key is ignored, even when
+the header is absent. Validation errors are keyed by the header name. A body that is not a JSON object keeps its
+existing error response.
+
+## Mutation replay lifecycle
+
+`CreateView` and `UpdateView` initialize `self.replayed = False` for each request. An endpoint that finds a
+durable prior result may set it to `True` and provide that result through its usual `get_data()` path. The
+endpoint owns key scope, request matching, and result retrieval; the framework does not infer a replay from
+an unchanged row or a zero-row update.
+
+When `replayed` is true, the views skip their `after_create`/`after_update` hooks, including the in-transaction
+variants. `CreateView` returns 200 instead of 201; `UpdateView` returns its usual 200 and accepts a zero-row
+write. `get_data()` still runs so the endpoint can return its stored result. Write hooks before replay detection
+must be safe to run again.
 
 # ToDo
 - [ ] Create real simple ToDo example and create example with using different profiles and jsonb fields

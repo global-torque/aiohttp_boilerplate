@@ -1,6 +1,6 @@
 # aiohttp-boilerplate
 
-Version 0.12 supports CPython 3.12–3.14. Applications are created explicitly:
+Version 0.13 supports CPython 3.12–3.14. Applications are created explicitly:
 
 ```python
 from aiohttp_boilerplate.bootstrap import create_app

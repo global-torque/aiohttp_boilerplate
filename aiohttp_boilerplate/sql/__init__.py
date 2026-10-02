@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import traceback
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -321,3 +321,36 @@ class SQL:
             raise SQLException("is_exists requires a non-empty scope")
         query = f"SELECT 1 as t FROM {self.table} WHERE {self.prepare_where(where, copied)}"
         return await self.execute(query, copied, consts.FETCHVAL) is not None
+
+
+async def insert_or_get(
+    conn: Any,
+    table: str,
+    data: Mapping[str, Any],
+    *,
+    unique: Sequence[str],
+    match: Sequence[str] = (),
+) -> tuple[Any, bool]:
+    """Insert `data`, or return the row an earlier insert with the same idempotency key created.
+
+    unique: the columns of the table's partial unique index on idempotency_key.
+    match:  further columns that must equal `data` on a repeat; otherwise the key belongs to a
+            different request.
+    Returns (row, created); (None, False) when the key belongs to a different request.
+    """
+    table = validate_table(table)
+    if not data:
+        raise SQLException("insert data cannot be empty")
+    columns = [validate_identifier(key, kind="column") for key in data]
+    keys = [validate_identifier(key, kind="column") for key in (*unique, *match)]
+    placeholders = ",".join(f"${index}" for index in range(1, len(columns) + 1))
+    row = await conn.fetchrow(
+        f"insert into {table}({','.join(columns)}) values({placeholders}) "
+        f"on conflict ({','.join(unique)}) where idempotency_key <> '' do nothing returning *",
+        *data.values(),
+    )
+    if row is not None:
+        return row, True
+    where = " and ".join(f"{key}=${index}" for index, key in enumerate(keys, start=1))
+    row = await conn.fetchrow(f"select * from {table} where {where}", *(data[key] for key in keys))
+    return row, False

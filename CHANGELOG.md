@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.13.0 - 2026-10-02
+
+### Added
+
+- `sql.insert_or_get(conn, table, data, *, unique, match=())` for idempotent creates on the caller's connection. It
+  inserts with `ON CONFLICT (<unique>) WHERE idempotency_key <> '' DO NOTHING RETURNING *` and returns `(row, True)`.
+  On a repeated key it returns the stored row whose `unique` and `match` columns equal `data` as `(row, False)`, or
+  `(None, False)` when the key belongs to a different request. The table needs a partial unique index on the `unique`
+  columns `WHERE idempotency_key <> ''`; rows without a key never conflict.
+
+### Compatibility
+
+- Additive: existing SQL, models and views are unchanged, and applications that do not call `insert_or_get` need no
+  changes. Python 3.12–3.14 and the dependency range are unchanged.
+
 ## 0.12.0 - 2026-09-30
 
 ### Added

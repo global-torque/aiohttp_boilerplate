@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from aiohttp_boilerplate.models import JsonbManager, Manager
-from aiohttp_boilerplate.sql import SQL, SQLException
+from aiohttp_boilerplate.sql import SQL, SQLException, insert_or_get
 from aiohttp_boilerplate.views.request import RequestContext, RequestLoggerAdapter
 
 
@@ -256,3 +256,59 @@ async def test_invalid_fetch_mode_rejects_before_acquisition() -> None:
     with pytest.raises(SQLException, match="Unsupported fetch method"):
         await SQL("widgets", pool).execute("select 1", {}, "fetch_secret")
     assert pool.acquired == 0
+
+
+class KeyConflictConnection(FakeConnection):
+    """The insert hits the idempotency key index; the select answers with next_row."""
+
+    async def fetchrow(self, query: str, *args: Any) -> Mapping[str, Any] | None:
+        row = await super().fetchrow(query, *args)
+        return None if query.startswith("insert") else row
+
+
+@pytest.mark.asyncio
+async def test_insert_or_get_creates_the_row_through_the_key_index() -> None:
+    connection = FakeConnection()
+
+    result = await insert_or_get(
+        connection,
+        "widgets",
+        {"tenant_id": 7, "idempotency_key": "key-1", "name": "one"},
+        unique=("tenant_id", "idempotency_key"),
+        match=("name",),
+    )
+
+    assert result == ({"id": 1}, True)
+    assert connection.calls == [
+        (
+            "fetchrow",
+            "insert into widgets(tenant_id,idempotency_key,name) values($1,$2,$3) "
+            "on conflict (tenant_id,idempotency_key) where idempotency_key <> '' do nothing "
+            "returning *",
+            (7, "key-1", "one"),
+        )
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stored", [{"id": 5}, None])
+async def test_insert_or_get_reads_the_row_of_a_repeated_key(
+    stored: Mapping[str, Any] | None,
+) -> None:
+    connection = KeyConflictConnection()
+    connection.next_row = stored
+
+    result = await insert_or_get(
+        connection,
+        "widgets",
+        {"name": "one", "note": "not matched", "idempotency_key": "key-1", "tenant_id": 7},
+        unique=("tenant_id", "idempotency_key"),
+        match=("name",),
+    )
+
+    assert result == (stored, False)
+    assert connection.calls[-1] == (
+        "fetchrow",
+        "select * from widgets where tenant_id=$1 and idempotency_key=$2 and name=$3",
+        (7, "key-1", "one"),
+    )

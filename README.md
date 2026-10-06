@@ -49,10 +49,12 @@ app.router.add_view("/items/{id}", ItemView)
 ```
 
 `OptionsView.options()` returns the schema without requiring preflight headers.
-Browser preflights are validated by aiohttp-cors and receive the schema with
-CORS headers. Browser schema requests containing only `Origin` also receive
-the configured CORS headers. Schema OPTIONS works when CORS is disabled.
-Separate explicit OPTIONS routes still conflict with aiohttp-cors.
+The same schema is available from `GET /items/{id}?schema=1`, including for
+views that do not otherwise implement GET. Browser preflights are validated by
+aiohttp-cors and receive the schema with CORS headers. Browser schema requests
+containing only `Origin` also receive the configured CORS headers. Schema
+OPTIONS works when CORS is disabled. Separate explicit OPTIONS routes still
+conflict with aiohttp-cors.
 
 `add_view()` exposes all HTTP methods implemented or inherited by the class.
 Use `ObjectView` for a custom PUT handler when the inherited PATCH method on

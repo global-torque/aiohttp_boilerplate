@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.12.1 - 2026-10-06
+
+### Added
+
+- `GET /resource?schema=1` returns the same JSON Schema as the resource's
+  `OPTIONS` request without running the regular GET handler.
+
 ## 0.12.0 - 2026-09-30
 
 ### Added

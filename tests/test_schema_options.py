@@ -86,6 +86,34 @@ async def test_plain_options_returns_schema_without_preflight_headers(
         assert (await client.request(method, PATH)).status == 405
 
 
+@pytest.mark.parametrize("cors", [False, True])
+async def test_get_schema_query_returns_options_schema_without_dispatching_get(
+    aiohttp_client, monkeypatch, cors
+):
+    client = await aiohttp_client(make_app(monkeypatch, cors=cors))
+    options = await client.options(PATH)
+    response = await client.get(f"{PATH}?schema=1")
+
+    await assert_schema(response)
+    assert await response.json() == await options.json()
+    assert (await client.get(f"{PATH}?schema=0")).status == 405
+
+
+async def test_get_schema_query_uses_normal_get_cors_handling(aiohttp_client, monkeypatch):
+    client = await aiohttp_client(make_app(monkeypatch))
+
+    allowed = await client.get(f"{PATH}?schema=1", headers={"Origin": ORIGIN})
+    await assert_schema(allowed)
+    assert allowed.headers["Access-Control-Allow-Origin"] == ORIGIN
+    assert allowed.headers["Access-Control-Allow-Credentials"] == "true"
+
+    untrusted = await client.get(
+        f"{PATH}?schema=1", headers={"Origin": "https://untrusted.example"}
+    )
+    await assert_schema(untrusted)
+    assert "Access-Control-Allow-Origin" not in untrusted.headers
+
+
 @pytest.mark.parametrize(
     ("headers", "body", "status", "expected"),
     [

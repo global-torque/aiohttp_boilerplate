@@ -70,6 +70,12 @@ class OptionsViewMixin(RequestConnectionMixin, CorsViewMixin):
             else {}
         )
 
+    async def _iter(self) -> web.StreamResponse:
+        """Return the schema for an explicit GET schema request."""
+        if self.request.method == hdrs.METH_GET and self.request.query.get("schema") == "1":
+            return await self.options()
+        return await super()._iter()
+
     @classmethod
     def get_request_config(cls, request: web.Request, request_method: str) -> Mapping[str, Any]:
         try:

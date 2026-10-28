@@ -19,7 +19,6 @@ description: >-
   `AGENTS.md`, this skill, and its migration runner contract. Do not let an
   older caller-repository copy override the destination's current guidance.
 - This package is maintained in `i-migration-service/.agents/skills/database-migrations`.
-  Update installed copies with `scripts/sync_copies.py`; use `--check` to detect drift.
 
 ## Golden Rule: Application Owns Logic
 
@@ -81,8 +80,9 @@ completely before acting.
 4. Write the expected transition plainly. Use `ADD COLUMN`, `CREATE TABLE`,
    `CREATE INDEX`, or `ALTER TYPE` without rerun guards. Use `ADD CONSTRAINT`
    only after the constraint gate above.
-5. Do not use `IF EXISTS`, `IF NOT EXISTS`, or catalog-driven `DO` blocks to
-   hide ordering errors or schema drift. For a proven legacy repair, read
+5. Do not use `IF EXISTS`, `IF NOT EXISTS`, catalog-driven `DO` blocks, or added validation as
+   preflight inside migration SQL. Let ordinary DDL fail naturally when its normal PostgreSQL
+   preconditions are unmet. For historical repair planning, consult
    [references/advanced-migrations.md](references/advanced-migrations.md).
 6. Backfill or remove incompatible rows before adding `NOT NULL`, changing a
    type, or introducing another stricter storage contract.

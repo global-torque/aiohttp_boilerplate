@@ -23,10 +23,14 @@ ALTER TYPE tokenization_engine_t ADD VALUE 'ERC-7943';
 
 ## Historical Repairs
 
-Use plain fail-loud SQL for canonical migrations. Use catalog inspection or a
-conditional `DO` block only after proving a specific deployed legacy state.
-Document the accepted precondition, keep the repair small, and fail on any
-unexpected shape.
+Ordinary PostgreSQL operations may fail when their normal preconditions are unmet. That
+failure is expected and must not be suppressed. “Fail loudly” does not authorize adding
+catalog inspections, conditional `DO` blocks, data validation, or application/domain validation
+inside migration SQL.
+
+Inspect and verify historical assumptions outside migration SQL. Write the smallest plain forward
+operation. If observed states cannot be handled safely by one plain operation, stop and plan
+separate forward migrations.
 
 Never edit a historical migration to repair an applied database. Add a new
 forward migration with a version greater than both checked-in and deployed
